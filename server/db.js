@@ -1,4 +1,4 @@
-// Opens campus.db. On first start it builds the tables from db/schema.sql
+// Opens campus.db. On first start it builds the tables from db/Database_schema.sql
 // and adds the two test accounts (one student, one faculty member).
 const fs = require('fs');
 const path = require('path');
@@ -25,7 +25,7 @@ function verifyPassword(plain, stored) {
 }
 
 if (isNew) {
-  db.exec(fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8'));
+  db.exec(fs.readFileSync(path.join(__dirname, '..', 'db', 'Database_schema.sql'), 'utf8'));
 
   const addUser = db.prepare(`INSERT INTO User (user_ID, first_Name, last_Name, gender, DOB, street, city, state, zip_Code, user_Type)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);

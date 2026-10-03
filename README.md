@@ -13,7 +13,7 @@ npm install
 npm start        # http://localhost:3000
 ```
 
-The first start creates `campus.db` from `db/schema.sql` and adds two test accounts.
+The first start creates `campus.db` from `db/Database_schema.sql` and adds two test accounts.
 `npm run reset-db` deletes the database and starts fresh.
 
 ## Test accounts (password `Campus123!`)
@@ -27,7 +27,7 @@ The first start creates `campus.db` from `db/schema.sql` and adds two test accou
 
 | Path | What it is |
 |---|---|
-| `db/schema.sql` | Database schema (all tables) |
+| `db/Database_schema.sql` | Database schema (all tables) |
 | `server/db.js` | Creates the database and the test accounts |
 | `server/index.js` | Login / logout server |
 | `public/` | Login page |
