@@ -1,0 +1,38 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #16213a; background: #fff; }
+.auth { display: grid; grid-template-columns: 1.05fr 1fr; min-height: 100vh; }
+
+.hero { background: linear-gradient(155deg, #1f3a68 0%, #16294d 60%, #0f1f3d 100%); color: #dfe8f7; padding: 56px; display: flex; flex-direction: column; gap: 28px; }
+.brand { display: flex; align-items: center; gap: 10px; color: #fff; font-weight: 700; font-size: 1.1rem; }
+.brand .logo { width: 36px; height: 36px; border-radius: 9px; background: rgba(255,255,255,.12); display: grid; place-items: center; }
+.brand small { display: block; font-weight: 500; font-size: .72rem; color: #a9bddf; letter-spacing: .04em; text-transform: uppercase; }
+.hero h1 { color: #fff; font-size: 2.3rem; line-height: 1.15; margin: 0; }
+.lead { font-size: 1.05rem; color: #b8c9e6; max-width: 460px; }
+.foot { margin-top: auto; font-size: .82rem; color: #8ea3c8; }
+
+.panel { display: grid; place-items: center; padding: 40px 24px; }
+.card { width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 16px; }
+h2 { margin: 0; font-size: 1.6rem; }
+p { margin: 4px 0 0; }
+.muted { color: #7a849b; }
+.small { font-size: .85rem; }
+
+form { display: flex; flex-direction: column; gap: 12px; }
+label { display: flex; flex-direction: column; gap: 5px; font-size: .85rem; font-weight: 600; color: #4a5570; }
+input { font: inherit; padding: 10px 12px; border: 1px solid #cfd6e3; border-radius: 8px; }
+input:focus { outline: 2px solid #9cc3ff; border-color: #2b6fdb; }
+button { font: inherit; font-weight: 600; padding: 10px 14px; border-radius: 8px; border: 1px solid #cfd6e3; background: #fff; cursor: pointer; }
+button.primary { background: #2b5aa6; border-color: #2b5aa6; color: #fff; }
+button.primary:hover { background: #1f3a68; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+
+.error { padding: 10px 14px; border-radius: 8px; background: #fdecea; border: 1px solid #f6c7c1; color: #7a1b12; font-size: .9rem; }
+.demo { border: 1px dashed #cfd6e3; border-radius: 10px; padding: 12px 14px; background: #f8f9fc; }
+.chips { display: flex; gap: 6px; margin-top: 8px; }
+.chips button { border-radius: 99px; padding: 4px 12px; font-size: .8rem; font-weight: 500; }
+
+@media (max-width: 860px) {
+  .auth { grid-template-columns: 1fr; }
+  .hero { padding: 32px 20px; }
+  .foot { display: none; }
+}

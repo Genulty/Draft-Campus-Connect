@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Campus Connect</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="auth">
+    <div class="hero">
+      <div class="brand"><span class="logo">🎓</span><span>Campus Connect<small>University Portal</small></span></div>
+      <div>
+        <h1>One place for registration, teaching and reporting.</h1>
+        <p class="lead">Students, faculty, administrators and the Statistics Department each see exactly what their role allows.</p>
+      </div>
+      <div class="foot">CS5910 System Design and Implementation · Julio Larrea, Muiz M. Onifade, Pavel Clarke</div>
+    </div>
+
+    <div class="panel">
+      <!-- Sign-in form -->
+      <div class="card" id="login-view">
+        <div><h2>Sign in</h2><p class="muted">Use your campus email and password.</p></div>
+        <div id="message"></div>
+        <form id="login-form">
+          <label>Email<input name="email" type="email" autocomplete="username" required autofocus></label>
+          <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+          <button type="submit" class="primary">Sign in</button>
+        </form>
+        <p class="muted small">Accounts lock after 5 failed attempts.</p>
+        <div class="demo small">
+          <b>Test accounts</b> <span class="muted">— password <code>Campus123!</code></span>
+          <div class="chips">
+            <button type="button" data-email="student@campus.edu">Student</button>
+            <button type="button" data-email="faculty@campus.edu">Faculty</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Shown after signing in -->
+      <div class="card" id="welcome-view" hidden>
+        <h2 id="welcome-name"></h2>
+        <p class="muted" id="welcome-detail"></p>
+        <p>You are signed in.</p>
+        <button type="button" id="logout">Sign out</button>
+      </div>
+    </div>
+  </div>
+  <script src="login.js"></script>
+</body>
+</html>
