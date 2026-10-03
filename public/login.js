@@ -1,19 +1,23 @@
 // Login page logic.
-const loginView = document.getElementById('login-view');
-const welcomeView = document.getElementById('welcome-view');
+const loginPage = document.getElementById('login-page');
+const dashboardPage = document.getElementById('dashboard-page');
 const form = document.getElementById('login-form');
 const message = document.getElementById('message');
 
-function showWelcome(user) {
+function showDashboard(user) {
   document.getElementById('welcome-name').textContent = `Welcome, ${user.name}`;
-  document.getElementById('welcome-detail').textContent = `${user.role} · ${user.email} · ID ${user.id}`;
-  loginView.hidden = true;
-  welcomeView.hidden = false;
+  document.getElementById('welcome-detail').textContent = `${user.role} · ID ${user.id}`;
+  document.getElementById('me-name').textContent = user.name;
+  document.getElementById('me-email').textContent = user.email;
+  document.getElementById('me-role').textContent = user.role;
+  document.getElementById('portal-name').textContent = `${user.role} portal`;
+  loginPage.hidden = true;
+  dashboardPage.hidden = false;
 }
 
 function showLogin() {
-  welcomeView.hidden = true;
-  loginView.hidden = false;
+  dashboardPage.hidden = true;
+  loginPage.hidden = false;
   form.reset();
   message.innerHTML = '';
 }
@@ -37,7 +41,7 @@ form.addEventListener('submit', async (e) => {
       message.appendChild(box);
       form.password.value = '';
     } else {
-      showWelcome(data.user);
+      showDashboard(data.user);
     }
   } finally {
     button.disabled = false;
@@ -57,4 +61,4 @@ document.getElementById('logout').addEventListener('click', async () => {
 });
 
 // Stay signed in after a page refresh
-fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then((d) => { if (d) showWelcome(d.user); });
+fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then((d) => { if (d) showDashboard(d.user); });

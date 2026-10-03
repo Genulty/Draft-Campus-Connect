@@ -31,7 +31,24 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .chips { display: flex; gap: 6px; margin-top: 8px; }
 .chips button { border-radius: 99px; padding: 4px 12px; font-size: .8rem; font-weight: 500; }
 
+/* ---------- Dashboard ---------- */
+[hidden] { display: none !important; }
+.shell { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; background: #f4f6fa; }
+.sidebar { background: #1f3a68; color: #dfe8f7; padding: 18px 14px; display: flex; flex-direction: column; gap: 16px; }
+.sidebar nav a { display: block; padding: 8px 10px; border-radius: 8px; color: #dfe8f7; text-decoration: none; font-weight: 500; }
+.sidebar nav a.active { background: #fff; color: #1f3a68; }
+.me { margin-top: auto; border-top: 1px solid rgba(255,255,255,.12); padding-top: 12px; font-size: .85rem; display: flex; flex-direction: column; gap: 2px; }
+.me strong { color: #fff; }
+.me span { color: #a9bddf; }
+.me button { margin-top: 10px; background: transparent; color: #dfe8f7; border-color: rgba(255,255,255,.3); }
+.main { display: flex; flex-direction: column; min-width: 0; }
+.topbar { background: #fff; border-bottom: 1px solid #e3e7ef; padding: 12px 28px; }
+.badge { background: #1f3a68; color: #fff; border-radius: 99px; padding: 3px 10px; font-size: .75rem; font-weight: 600; }
+.content { padding: 24px 28px; display: flex; flex-direction: column; gap: 16px; }
+.empty { border: 2px dashed #cfd6e3; border-radius: 12px; padding: 60px 20px; text-align: center; color: #7a849b; background: #fff; }
+
 @media (max-width: 860px) {
+  .shell { grid-template-columns: 1fr; }
   .auth { grid-template-columns: 1fr; }
   .hero { padding: 32px 20px; }
   .foot { display: none; }

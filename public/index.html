@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="auth">
+  <div class="auth" id="login-page">
     <div class="hero">
       <div class="brand"><span class="logo">🎓</span><span>Campus Connect<small>University Portal</small></span></div>
       <div>
@@ -40,15 +40,29 @@
         </div>
       </div>
 
-      <!-- Shown after signing in -->
-      <div class="card" id="welcome-view" hidden>
-        <h2 id="welcome-name"></h2>
-        <p class="muted" id="welcome-detail"></p>
-        <p>You are signed in.</p>
-        <button type="button" id="logout">Sign out</button>
-      </div>
     </div>
   </div>
+  <!-- Dashboard (shown after signing in) -->
+  <div class="shell" id="dashboard-page" hidden>
+    <aside class="sidebar">
+      <div class="brand"><span class="logo">🎓</span><span>Campus Connect<small id="portal-name">Portal</small></span></div>
+      <nav><a class="active" href="#">Dashboard</a></nav>
+      <div class="me">
+        <strong id="me-name"></strong>
+        <span id="me-email"></span>
+        <button type="button" id="logout">Sign out</button>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><span class="badge" id="me-role"></span></header>
+      <section class="content">
+        <h2 id="welcome-name"></h2>
+        <p class="muted" id="welcome-detail"></p>
+        <div class="empty">Nothing here yet.</div>
+      </section>
+    </main>
+  </div>
+
   <script src="login.js"></script>
 </body>
 </html>
