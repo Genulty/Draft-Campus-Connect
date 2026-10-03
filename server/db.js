@@ -33,14 +33,14 @@ if (isNew) {
 
   db.transaction(() => {
     // Test student
-    addUser.run(100001, 'Alex', 'Rivera', 'Male', '2004-03-14', '520 Lake View Rd', 'Hicksville', 'NY', '11801', 'Student');
+    addUser.run(100001, 'Julio', 'Larrea', 'Male', '2004-03-14', '520 Lake View Rd', 'Hicksville', 'NY', '11801', 'Student');
     addLogin.run(100001, 'student@campus.edu', hashPassword('Campus123!'), 'Student');
     db.prepare("INSERT INTO Student (student_ID, student_Year, student_Type) VALUES (100001, 'Junior', 'Undergraduate')").run();
     db.prepare("INSERT INTO Undergraduate_Student (student_ID, undergraduate_Student_Type) VALUES (100001, 'Full-time')").run();
     db.prepare('INSERT INTO Full_Time_Undergraduate (student_ID) VALUES (100001)').run();
 
     // Test faculty member
-    addUser.run(200001, 'Maria', 'Chen', 'Female', '1984-08-17', '488 Pine St', 'Westbury', 'NY', '11590', 'Faculty');
+    addUser.run(200001, 'Pavel', 'Clarke', 'Male', '1984-08-17', '488 Pine St', 'Westbury', 'NY', '11590', 'Faculty');
     addLogin.run(200001, 'faculty@campus.edu', hashPassword('Campus123!'), 'Faculty');
     db.prepare("INSERT INTO Faculty (faculty_ID, rank, faculty_Type) VALUES (200001, 'Associate Professor', 'Full-time')").run();
   })();
