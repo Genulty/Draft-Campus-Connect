@@ -14,6 +14,17 @@ APP_USER="$(stat -c %U "$APP_DIR")"
 ENV_FILE=/etc/campus-connect.env
 SERVICE=campus-connect
 
+# Small plans (512 MB) run out of memory building better-sqlite3; add 1 GB of swap.
+MEM_MB="$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)"
+if [ "$MEM_MB" -lt 1500 ] && ! swapon --show | grep -q .; then
+  echo "==> Adding 1 GB swap (only ${MEM_MB} MB RAM)"
+  fallocate -l 1G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=1024
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+
 echo "==> Installing system packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
