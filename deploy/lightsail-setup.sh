@@ -14,7 +14,7 @@ APP_USER="$(stat -c %U "$APP_DIR")"
 ENV_FILE=/etc/campus-connect.env
 SERVICE=campus-connect
 
-# Small plans (512 MB) run out of memory building better-sqlite3; add 1 GB of swap.
+# Small plans (512 MB) don't have enough memory for MySQL + Node; add 1 GB of swap.
 MEM_MB="$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)"
 if [ "$MEM_MB" -lt 1500 ] && ! swapon --show | grep -q .; then
   echo "==> Adding 1 GB swap (only ${MEM_MB} MB RAM)"
@@ -28,7 +28,7 @@ fi
 echo "==> Installing system packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y curl git nginx build-essential python3 ca-certificates
+apt-get install -y curl git nginx mysql-server ca-certificates
 
 NODE_MAJOR="$(node -v 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/' || true)"
 if [ -z "$NODE_MAJOR" ] || [ "$NODE_MAJOR" -lt 18 ]; then
@@ -41,23 +41,58 @@ echo "Node $(node -v)"
 echo "==> Installing app dependencies"
 sudo -u "$APP_USER" bash -c "cd '$APP_DIR' && npm ci --omit=dev"
 
+# Keep MySQL's memory use small enough for the 512 MB plan.
+cat > /etc/mysql/mysql.conf.d/zz-campus-connect.cnf <<'CNF'
+[mysqld]
+performance_schema = OFF
+innodb_buffer_pool_size = 64M
+max_connections = 30
+CNF
+systemctl enable mysql
+systemctl restart mysql
+
+# Older installs of this script used SQLite; start the env file over for MySQL.
+if [ -f "$ENV_FILE" ] && ! grep -q '^DB_PASSWORD=' "$ENV_FILE"; then
+  rm -f "$ENV_FILE"
+fi
 if [ ! -f "$ENV_FILE" ]; then
   echo "==> Writing $ENV_FILE"
   cat > "$ENV_FILE" <<ENV
 NODE_ENV=production
 HOST=127.0.0.1
 PORT=3000
-DB_PATH=$APP_DIR/campus.db
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=campus
+DB_PASSWORD=$(openssl rand -hex 16)
+DB_NAME=campus_connect
 SESSION_SECRET=$(openssl rand -hex 32)
 ENV
   chmod 600 "$ENV_FILE"
+fi
+DB_PASSWORD="$(grep '^DB_PASSWORD=' "$ENV_FILE" | cut -d= -f2)"
+
+echo "==> Creating MySQL user 'campus'"
+mysql <<SQL
+CREATE USER IF NOT EXISTS 'campus'@'localhost' IDENTIFIED BY '$DB_PASSWORD';
+ALTER USER 'campus'@'localhost' IDENTIFIED BY '$DB_PASSWORD';
+GRANT ALL PRIVILEGES ON campus_connect.* TO 'campus'@'localhost';
+FLUSH PRIVILEGES;
+SQL
+
+if ! mysql -e 'USE campus_connect' 2>/dev/null; then
+  echo "==> Creating the campus_connect database and loading the project data"
+  (cd "$APP_DIR" && sudo -u "$APP_USER" env $(grep -v '^#' "$ENV_FILE" | xargs) node db/load.js)
+else
+  echo "==> Database campus_connect already exists (reload it with: sudo bash deploy/reset-db.sh)"
 fi
 
 echo "==> Creating systemd service"
 cat > /etc/systemd/system/$SERVICE.service <<UNIT
 [Unit]
 Description=Campus Connect
-After=network.target
+After=network.target mysql.service
+Requires=mysql.service
 
 [Service]
 User=$APP_USER

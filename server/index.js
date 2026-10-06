@@ -16,18 +16,18 @@ app.use(session({
   cookie: { httpOnly: true, sameSite: 'lax', maxAge: 1000 * 60 * 60 * 8 },
 }));
 
-function userInfo(id) {
-  const u = db.prepare(`SELECT u.user_ID, u.first_Name, u.last_Name, u.user_Type, l.user_Email
-    FROM User u JOIN Login l ON l.user_ID = u.user_ID WHERE u.user_ID = ?`).get(id);
+async function userInfo(id) {
+  const [[u]] = await db.query(`SELECT u.user_ID, u.first_Name, u.last_Name, u.user_Type, l.user_Email
+    FROM User u JOIN Login l ON l.user_ID = u.user_ID WHERE u.user_ID = ?`, [id]);
   return { id: u.user_ID, name: `${u.first_Name} ${u.last_Name}`, role: u.user_Type, email: u.user_Email };
 }
 
 // Use cases: successful / unsuccessful login
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: 'Enter your email and password.' });
 
-  const login = db.prepare('SELECT * FROM Login WHERE lower(user_Email) = lower(?)').get(String(email).trim());
+  const [[login]] = await db.query('SELECT * FROM Login WHERE user_Email = ?', [String(email).trim()]);
   if (!login) return res.status(401).json({ error: 'Invalid email or password.' });
   if (login.lock_Var) {
     return res.status(423).json({ error: 'This account is locked after too many failed attempts. Contact an administrator.' });
@@ -36,7 +36,7 @@ app.post('/api/login', (req, res) => {
   if (!verifyPassword(password, login.user_Password)) {
     const tries = login.no_Of_Tries + 1;
     const locked = tries >= MAX_ATTEMPTS ? 1 : 0;
-    db.prepare('UPDATE Login SET no_Of_Tries = ?, lock_Var = ? WHERE user_ID = ?').run(tries, locked, login.user_ID);
+    await db.query('UPDATE Login SET no_Of_Tries = ?, lock_Var = ? WHERE user_ID = ?', [tries, locked, login.user_ID]);
     return res.status(401).json({
       error: locked
         ? 'Invalid email or password. The account is now locked.'
@@ -44,8 +44,8 @@ app.post('/api/login', (req, res) => {
     });
   }
 
-  db.prepare('UPDATE Login SET no_Of_Tries = 0 WHERE user_ID = ?').run(login.user_ID);
-  req.session.user = userInfo(login.user_ID);
+  await db.query('UPDATE Login SET no_Of_Tries = 0 WHERE user_ID = ?', [login.user_ID]);
+  req.session.user = await userInfo(login.user_ID);
   res.json({ user: req.session.user });
 });
 

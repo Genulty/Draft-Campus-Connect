@@ -15,8 +15,9 @@ cd draft-campus-connect
 sudo bash deploy/lightsail-setup.sh
 ```
 
-The script installs Node.js, nginx and the dependencies, runs the app as a
-service that restarts on crashes and reboots, and serves it on port 80. When it
+The script installs Node.js, MySQL and nginx, creates the `campus_connect` database
+and loads all the project data, runs the app as a service that restarts on crashes
+and reboots, and serves it on port 80. When it
 finishes it prints the address, e.g. `http://3.91.12.34`.
 
 > **Private repo?** `git clone` will ask for a username and password. Use your
@@ -44,6 +45,8 @@ sudo bash deploy/lightsail-setup.sh
 | Live logs | `sudo journalctl -u campus-connect -f` |
 | Restart | `sudo systemctl restart campus-connect` |
 | Status | `sudo systemctl status campus-connect` |
-| Reset the database | `sudo systemctl stop campus-connect && rm ~/draft-campus-connect/campus.db && sudo systemctl start campus-connect` |
+| Reset the database | `sudo bash deploy/reset-db.sh` |
+| Open MySQL | `sudo mysql campus_connect` |
+| Run the sample queries | `sudo mysql campus_connect < db/sample-queries.sql` |
 
-Settings (port, session secret, database path) live in `/etc/campus-connect.env`.
+Settings (port, session secret, MySQL user and password) live in `/etc/campus-connect.env`.

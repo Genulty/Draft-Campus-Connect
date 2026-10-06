@@ -1,4 +1,3 @@
 node_modules/
-campus.db
-campus.db-*
 .DS_Store
+.env

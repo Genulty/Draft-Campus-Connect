@@ -1,17 +1,20 @@
 {
   "name": "draft-campus-connect",
   "version": "1.0.0",
-  "description": "Campus Connect System - login screen and database schema",
+  "description": "Campus Connect System - login screen and MySQL database",
   "main": "server/index.js",
   "private": true,
   "scripts": {
     "start": "node server/index.js",
-    "reset-db": "node -e \"require('fs').rmSync('campus.db',{force:true})\" && node server/index.js"
+    "db:generate": "node db/generate-data.js",
+    "db:setup": "node db/load.js"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
-    "better-sqlite3": "^12.4.1",
     "express": "^5.1.0",
-    "express-session": "^1.18.2"
+    "express-session": "^1.18.2",
+    "mysql2": "^3.24.5"
   }
 }
