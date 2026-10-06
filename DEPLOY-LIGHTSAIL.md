@@ -32,6 +32,14 @@ page doesn't load, check **Networking → IPv4 Firewall** on the instance.
 Tip: under **Networking**, attach a **static IP** so the address doesn't change
 when the instance is stopped and started.
 
+## HTTPS (needed for most phones)
+Phone browsers often refuse plain `http://` sites. To turn on HTTPS:
+1. Lightsail console → your instance → **Networking** → IPv4 Firewall → **Add rule** → **HTTPS** (TCP 443) → Create.
+2. In the SSH window: `sudo bash deploy/enable-https.sh`
+3. Open the address it prints, e.g. `https://3-239-161-185.sslip.io`.
+
+The certificate renews automatically. If you attach a static IP later, run the script again (the sslip.io name is built from the IP).
+
 ## Updating after new commits
 ```bash
 cd ~/draft-campus-connect

@@ -109,8 +109,12 @@ systemctl daemon-reload
 systemctl enable $SERVICE
 systemctl restart $SERVICE
 
-echo "==> Configuring nginx on port 80"
-cat > /etc/nginx/sites-available/$SERVICE <<'NGINX'
+# Keep the HTTPS config that deploy/enable-https.sh (certbot) wrote; only create the plain HTTP one.
+if grep -q 'managed by Certbot' /etc/nginx/sites-available/$SERVICE 2>/dev/null; then
+  echo "==> nginx already has HTTPS (certbot); leaving its config as is"
+else
+  echo "==> Configuring nginx on port 80"
+  cat > /etc/nginx/sites-available/$SERVICE <<'NGINX'
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
@@ -125,6 +129,7 @@ server {
     }
 }
 NGINX
+fi
 ln -sf /etc/nginx/sites-available/$SERVICE /etc/nginx/sites-enabled/$SERVICE
 rm -f /etc/nginx/sites-enabled/default
 nginx -t
