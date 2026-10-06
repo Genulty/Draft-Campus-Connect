@@ -36,6 +36,8 @@
           <div class="chips">
             <button type="button" data-email="student@campus.edu">Student</button>
             <button type="button" data-email="faculty@campus.edu">Faculty</button>
+            <button type="button" data-email="admin@campus.edu">Admin</button>
+            <button type="button" data-email="stat@campus.edu">Stat-Dept</button>
           </div>
         </div>
       </div>
@@ -46,7 +48,7 @@
   <div class="shell" id="dashboard-page" hidden>
     <aside class="sidebar">
       <div class="brand"><span class="logo">🎓</span><span>Campus Connect<small id="portal-name">Portal</small></span></div>
-      <nav><a class="active" href="#">Dashboard</a></nav>
+      <nav id="nav"></nav>
       <div class="me">
         <strong id="me-name"></strong>
         <span id="me-email"></span>
@@ -54,11 +56,13 @@
       </div>
     </aside>
     <main class="main">
-      <header class="topbar"><span class="badge" id="me-role"></span></header>
+      <header class="topbar"><span class="badge" id="me-role"></span><span class="muted small" id="me-id"></span></header>
       <section class="content">
-        <h2 id="welcome-name"></h2>
-        <p class="muted" id="welcome-detail"></p>
-        <div class="empty">Nothing here yet.</div>
+        <div>
+          <h2 id="page-title"></h2>
+          <p class="muted" id="page-subtitle"></p>
+        </div>
+        <div id="page-blocks"></div>
       </section>
     </main>
   </div>

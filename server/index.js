@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
 const { db, verifyPassword } = require('./db');
+const { viewsFor, buildView } = require('./views');
 
 const MAX_ATTEMPTS = 5;
 const app = express();
@@ -54,6 +55,19 @@ app.post('/api/logout', (req, res) => req.session.destroy(() => res.json({ ok: t
 app.get('/api/me', (req, res) => {
   if (!req.session.user) return res.status(401).json({ error: 'Not logged in.' });
   res.json({ user: req.session.user });
+});
+
+// Dashboard pages for the signed-in user's role (read-only).
+app.get('/api/views', (req, res) => {
+  if (!req.session.user) return res.status(401).json({ error: 'Not logged in.' });
+  res.json({ views: viewsFor(req.session.user.role) });
+});
+
+app.get('/api/views/:id', async (req, res) => {
+  if (!req.session.user) return res.status(401).json({ error: 'Not logged in.' });
+  const page = await buildView(req.session.user, req.params.id, req.query);
+  if (!page) return res.status(404).json({ error: 'That page is not available for your role.' });
+  res.json(page);
 });
 
 app.use(express.static(path.join(__dirname, '..', 'public')));

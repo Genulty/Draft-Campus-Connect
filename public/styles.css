@@ -45,10 +45,31 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .topbar { background: #fff; border-bottom: 1px solid #e3e7ef; padding: 12px 28px; }
 .badge { background: #1f3a68; color: #fff; border-radius: 99px; padding: 3px 10px; font-size: .75rem; font-weight: 600; }
 .content { padding: 24px 28px; display: flex; flex-direction: column; gap: 16px; }
-.empty { border: 2px dashed #cfd6e3; border-radius: 12px; padding: 60px 20px; text-align: center; color: #7a849b; background: #fff; }
+.topbar { display: flex; align-items: center; gap: 10px; }
+.sidebar nav { display: flex; flex-direction: column; gap: 2px; }
+#page-blocks { display: flex; flex-direction: column; gap: 16px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.stat { background: #fff; border: 1px solid #e3e7ef; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.stat-label { font-size: .75rem; font-weight: 600; color: #7a849b; text-transform: uppercase; letter-spacing: .03em; }
+.stat-value { font-size: 1.05rem; color: #16213a; overflow-wrap: anywhere; }
+.filters { display: flex; flex-wrap: wrap; gap: 12px; }
+.filters label { flex-direction: row; align-items: center; gap: 8px; }
+select { font: inherit; padding: 7px 10px; border: 1px solid #cfd6e3; border-radius: 8px; background: #fff; }
+.table-card { background: #fff; border: 1px solid #e3e7ef; border-radius: 12px; overflow: hidden; }
+.table-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 14px 16px 10px; }
+.table-head h3 { margin: 0; font-size: 1rem; }
+.note { margin: -4px 16px 10px; }
+.empty-row { padding: 0 16px 16px; margin: 0; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+th, td { text-align: left; padding: 9px 16px; border-top: 1px solid #eef1f6; white-space: nowrap; }
+th { background: #f8f9fc; font-size: .75rem; text-transform: uppercase; letter-spacing: .03em; color: #4a5570; }
+tbody tr:hover { background: #f8f9fc; }
 
 @media (max-width: 860px) {
   .shell { grid-template-columns: 1fr; }
+  .sidebar nav { flex-direction: row; flex-wrap: wrap; }
+  .content { padding: 16px; }
   .auth { grid-template-columns: 1fr; }
   .hero { padding: 32px 20px; }
   .foot { display: none; }
