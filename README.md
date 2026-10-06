@@ -13,6 +13,8 @@ npm install
 npm start        # http://localhost:3000
 ```
 
+To put it online on Amazon Lightsail, see [DEPLOY-LIGHTSAIL.md](DEPLOY-LIGHTSAIL.md).
+
 The first start creates `campus.db` from `db/Database_schema.sql` and adds two test accounts.
 `npm run reset-db` deletes the database and starts fresh.
 
@@ -31,3 +33,4 @@ The first start creates `campus.db` from `db/Database_schema.sql` and adds two t
 | `server/db.js` | Creates the database and the test accounts |
 | `server/index.js` | Login / logout server |
 | `public/` | Login page |
+| `deploy/lightsail-setup.sh` | One-step setup for an Ubuntu server (Lightsail) |

@@ -7,6 +7,7 @@ const { db, verifyPassword } = require('./db');
 
 const MAX_ATTEMPTS = 5;
 const app = express();
+app.set('trust proxy', 1); // runs behind nginx in production
 app.use(express.json());
 app.use(session({
   secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
@@ -58,4 +59,5 @@ app.get('/api/me', (req, res) => {
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Campus Connect running at http://localhost:${PORT}`));
+const HOST = process.env.HOST || '0.0.0.0';
+app.listen(PORT, HOST, () => console.log(`Campus Connect running at http://${HOST}:${PORT}`));
