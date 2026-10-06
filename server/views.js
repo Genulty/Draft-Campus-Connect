@@ -11,6 +11,13 @@ async function one(sql, params = []) {
   const [[row]] = await db.query(sql, params);
   return row || {};
 }
+// A table that also shows the SQL that produced it, so a viewer can see the raw database rows.
+async function sqlTable(title, sql, params, note) {
+  const block = await table(title, sql, params, note);
+  let shown = sql;
+  for (const p of params) shown = shown.replace('?', typeof p === 'number' ? String(p) : `'${p}'`);
+  return { ...block, sql: shown.replace(/\s+/g, ' ').trim() };
+}
 const stats = (items) => ({ type: 'stats', items: items.map(([label, value]) => ({ label, value: value ?? '—' })) });
 
 // The current semester is the latest one that has started; the next is the first one that hasn't.
@@ -95,7 +102,7 @@ const VIEWS = [
     if (next.id) {
       blocks.push(await table(`${next.name} (next semester) · S-R5`, `SELECT ${SECTION_COLUMNS}, ${INSTRUCTOR} FROM Enrollment e
         JOIN Course_Section cs ON cs.CRN = e.CRN ${SECTION_JOINS}
-        WHERE e.student_ID = ? AND cs.semester_ID = ? ${ORDER_BY_TIME}`, [u.id, next.id], 'Registration for this semester has not opened yet.'));
+        WHERE e.student_ID = ? AND cs.semester_ID = ? ${ORDER_BY_TIME}`, [u.id, next.id], 'Add or drop sections on the Register page.'));
     }
     return { title: 'My schedule', blocks };
   } },
@@ -243,6 +250,82 @@ const VIEWS = [
         WHERE cs.semester_ID = ? AND (? = '' OR c.dept_ID = ?)
         GROUP BY cs.CRN, cs.course_ID, c.course_Name, cs.section_No, cs.max_Seats ORDER BY cs.course_ID, cs.section_No`,
       [f.semester, f.deptId, f.deptId]),
+    ] };
+  } },
+
+  // ---------------- Registration (S-R22, S-R23) ----------------
+  { id: 'register', label: 'Register', roles: ['Student'], async build(u, q) {
+    const [open] = await db.query(`SELECT semester_ID, semester_Name, add_Start, add_End, drop_Start, drop_End FROM Semester
+      WHERE CURDATE() BETWEEN add_Start AND add_End ORDER BY start_Date`);
+    if (!open.length) return { title: 'Register', subtitle: 'No semester is open for registration right now (S-F12).', blocks: [] };
+    const sem = open.find((x) => x.semester_ID === q.semester) || open[open.length - 1];
+    const [depts] = await db.query('SELECT dept_ID, dept_Name FROM Department ORDER BY dept_Name');
+    const me = await one(`SELECT COALESCE(ug.dept_ID, g.dept_ID) AS dept, COALESCE(ug.undergraduate_Student_Type, g.graduate_Student_Type) AS load_type,
+        s.student_Type FROM Student s LEFT JOIN Undergraduate_Student ug ON ug.student_ID = s.student_ID
+        LEFT JOIN Graduate_Student g ON g.student_ID = s.student_ID WHERE s.student_ID = ?`, [u.id]);
+    const deptId = depts.some((d) => d.dept_ID === q.dept) ? q.dept : me.dept;
+    const credits = await one(`SELECT COALESCE(SUM(c.course_Credits), 0) AS n FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN
+      JOIN Course c ON c.course_ID = cs.course_ID WHERE e.student_ID = ? AND cs.semester_ID = ?`, [u.id, sem.semester_ID]);
+    const holds = await one(`SELECT GROUP_CONCAT(h.hold_Type SEPARATOR ', ') AS list FROM Student_Hold sh JOIN Hold h ON h.hold_ID = sh.hold_ID
+      WHERE sh.student_ID = ?`, [u.id]);
+    const fmt = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const mine = await table(`My ${sem.semester_Name} registration`, `SELECT ${SECTION_COLUMNS}, ${INSTRUCTOR} FROM Enrollment e
+      JOIN Course_Section cs ON cs.CRN = e.CRN ${SECTION_JOINS}
+      WHERE e.student_ID = ? AND cs.semester_ID = ? ${ORDER_BY_TIME}`, [u.id, sem.semester_ID]);
+    mine.action = { label: 'Drop', endpoint: 'drop-section', column: 'CRN', style: 'danger' };
+    const available = await table(`Sections you can add`, `SELECT ${SECTION_COLUMNS}, ${INSTRUCTOR}, ${SEATS},
+        COALESCE((SELECT GROUP_CONCAT(cp.prerequisite_Course_ID SEPARATOR ', ') FROM Course_Prerequisite cp WHERE cp.course_ID = c.course_ID), '—') AS Prerequisites
+      FROM Course_Section cs ${SECTION_JOINS}
+      WHERE cs.semester_ID = ? AND c.dept_ID = ? AND c.course_Type = ?
+        AND cs.CRN NOT IN (SELECT CRN FROM Enrollment WHERE student_ID = ?)
+      ORDER BY cs.course_ID, cs.section_No`, [sem.semester_ID, deptId, me.student_Type, u.id],
+      'Every rule is checked when you click Add: holds, prerequisites, seats, credit limit, time conflicts and courses already passed.');
+    available.action = { label: 'Add', endpoint: 'add-section', column: 'CRN' };
+    return { title: `Register for ${sem.semester_Name}`, subtitle: 'S-R22 add a course section · S-R23 drop a course section', blocks: [
+      { type: 'filters', filters: [
+        { name: 'semester', label: 'Semester', value: sem.semester_ID, options: open.map((x) => [x.semester_ID, x.semester_Name]) },
+        { name: 'dept', label: 'Department', value: deptId, options: depts.map((d) => [d.dept_ID, d.dept_Name]) },
+      ] },
+      stats([['Registered credits', `${credits.n} of ${me.load_type === 'Full-time' ? 16 : 8}`], ['Active holds', holds.list || 'None'],
+        ['Add period', `${fmt(sem.add_Start)} – ${fmt(sem.add_End)}`], ['Drop period', `${fmt(sem.drop_Start)} – ${fmt(sem.drop_End)}`]]),
+      mine,
+      available,
+      await sqlTable('Database: Enrollment table', `SELECT e.student_ID, e.CRN, e.grade FROM Enrollment e
+        WHERE e.student_ID = ? AND e.CRN IN (SELECT CRN FROM Course_Section WHERE semester_ID = ?) ORDER BY e.CRN`, [u.id, sem.semester_ID],
+        'The rows stored in MySQL for you this semester. Add or drop a section and this updates.'),
+    ] };
+  } },
+
+  // ---------------- Admin: create a course section (A-R26) ----------------
+  { id: 'create-section', label: 'Create section', roles: ['Admin'], async build(u, q) {
+    const [sems] = await db.query('SELECT semester_ID, semester_Name FROM Semester WHERE start_Date > CURDATE() ORDER BY start_Date');
+    if (!sems.length) return { title: 'Create a course section', subtitle: 'There is no upcoming semester.', blocks: [] };
+    const sem = sems.find((x) => x.semester_ID === q.semester) || sems[0];
+    const [courses] = await db.query('SELECT course_ID, course_Name FROM Course ORDER BY course_ID');
+    const [fac] = await db.query(`SELECT f.faculty_ID, CONCAT(u.first_Name, ' ', u.last_Name) AS name, f.faculty_Type,
+        (SELECT GROUP_CONCAT(fd.dept_ID SEPARATOR '/') FROM Faculty_Department fd WHERE fd.faculty_ID = f.faculty_ID) AS depts,
+        (SELECT COUNT(*) FROM Course_Section cs WHERE cs.faculty_ID = f.faculty_ID AND cs.semester_ID = ?) AS teaching
+      FROM Faculty f JOIN User u ON u.user_ID = f.faculty_ID ORDER BY depts, u.last_Name`, [sem.semester_ID]);
+    const [slots] = await db.query(`SELECT ts.time_Slot_ID AS id,
+        CONCAT((SELECT GROUP_CONCAT(d.day_ID ORDER BY FIELD(d.day_ID,'M','T','W','R','F') SEPARATOR '') FROM Time_Slot_Day d WHERE d.time_Slot_ID = ts.time_Slot_ID),
+          ' ', TIME_FORMAT(p.start_Time, '%l:%i %p'), ' – ', TIME_FORMAT(p.end_Time, '%l:%i %p')) AS label
+      FROM Time_Slot ts JOIN Time_Slot_Period tp ON tp.time_Slot_ID = ts.time_Slot_ID JOIN Period p ON p.period_ID = tp.period_ID
+      ORDER BY ts.time_Slot_ID`);
+    const [rooms] = await db.query(`SELECT r.room_ID, b.building_Name, r.room_No, r.room_Type, r.capacity FROM Room r
+      JOIN Building b ON b.building_ID = r.building_ID ORDER BY r.room_ID`);
+    const v = (name, fallback) => q[name] ?? fallback;
+    return { title: 'Create a course section', subtitle: 'A-R26 · checked against A-F4 to A-F9 before it is saved', blocks: [
+      { type: 'form', title: `New section for ${sem.semester_Name}`, endpoint: 'create-section', submit: 'Create section', fields: [
+        { name: 'semester_ID', label: 'Semester', value: sem.semester_ID, options: sems.map((x) => [x.semester_ID, x.semester_Name]), reload: true },
+        { name: 'course_ID', label: 'Course', value: v('course_ID', 'CS455'), options: courses.map((c) => [c.course_ID, `${c.course_ID} ${c.course_Name}`]) },
+        { name: 'faculty_ID', label: 'Faculty', value: v('faculty_ID', ''), options: [['', 'Choose…'], ...fac.map((f) => [String(f.faculty_ID),
+          `${f.name} (${f.depts}, ${f.faculty_Type}, teaching ${f.teaching} of ${f.faculty_Type === 'Full-time' ? 2 : 1})`])] },
+        { name: 'time_Slot_ID', label: 'Time slot', value: v('time_Slot_ID', '1'), options: slots.map((t) => [String(t.id), t.label]) },
+        { name: 'room_ID', label: 'Room', value: v('room_ID', rooms[0].room_ID), options: rooms.map((r) => [r.room_ID, `${r.building_Name} ${r.room_No} (${r.room_Type}, ${r.capacity} seats)`]) },
+        { name: 'max_Seats', label: 'Max seats', type: 'number', min: 1, max: 10, value: v('max_Seats', '10') },
+      ] },
+      await sqlTable('Database: newest Course_Section rows', 'SELECT * FROM Course_Section WHERE semester_ID = ? ORDER BY CRN DESC LIMIT 5', [sem.semester_ID],
+        'The newest rows in MySQL. A section you create appears here at the top.'),
     ] };
   } },
 

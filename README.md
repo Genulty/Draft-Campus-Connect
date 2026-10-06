@@ -2,8 +2,8 @@
 
 CS5910 System Design and Implementation — Julio Larrea, Muiz M. Onifade, Pavel Clarke.
 
-Contains the MySQL database schema, generated project data for every table, a working login screen, and read-only
-dashboard pages for each role (student, faculty, admin, statistics department).
+Contains the MySQL database schema, generated project data for every table, a working login screen, dashboard pages for
+each role, student registration (add/drop) and admin course-section creation. See [DEMO.md](DEMO.md) for the midterm demo.
 
 ## Run it
 
@@ -72,6 +72,7 @@ no registration with an active hold, at most 15 advisees per full-time advisor.
 | `server/db.js` | MySQL connection |
 | `server/index.js` | Login / logout server and page API |
 | `server/views.js` | Dashboard pages for each role (the SQL behind each page) |
+| `server/actions.js` | Add/drop a section and create a section, with the SRS rule checks |
 | `public/` | Login page and dashboard |
 | `deploy/lightsail-setup.sh` | One-step setup for an Ubuntu server (Lightsail) |
 | `deploy/reset-db.sh` | Reloads the database on the server |

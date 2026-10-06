@@ -5,6 +5,7 @@ const express = require('express');
 const session = require('express-session');
 const { db, verifyPassword } = require('./db');
 const { viewsFor, buildView } = require('./views');
+const actions = require('./actions');
 
 const MAX_ATTEMPTS = 5;
 const app = express();
@@ -69,6 +70,26 @@ app.get('/api/views/:id', async (req, res) => {
   const page = await buildView(req.session.user, req.params.id, req.query);
   if (!page) return res.status(404).json({ error: 'That page is not available for your role.' });
   res.json(page);
+});
+
+// Actions that change the database. Each is limited to one role.
+const ACTIONS = {
+  'add-section': { role: 'Student', run: (u, body) => actions.addSection(u.id, Number(body.CRN)) },
+  'drop-section': { role: 'Student', run: (u, body) => actions.dropSection(u.id, Number(body.CRN)) },
+  'create-section': { role: 'Admin', run: (u, body) => actions.createSection(u.id, body) },
+};
+app.post('/api/actions/:name', async (req, res) => {
+  const user = req.session.user;
+  if (!user) return res.status(401).json({ error: 'Not logged in.' });
+  const action = ACTIONS[req.params.name];
+  if (!action || action.role !== user.role) return res.status(403).json({ error: 'Your role cannot do that.' });
+  try {
+    res.json(await action.run(user, req.body || {}));
+  } catch (err) {
+    if (err instanceof actions.RuleError) return res.status(422).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
 });
 
 app.use(express.static(path.join(__dirname, '..', 'public')));

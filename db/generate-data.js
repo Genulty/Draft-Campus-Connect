@@ -242,10 +242,11 @@ const SEMESTERS = [
   { id: 'FA25', name: 'Fall 2025',   start: '2025-08-27', end: '2025-12-19' },
   { id: 'SP26', name: 'Spring 2026', start: '2026-01-26', end: '2026-05-15' },
   { id: 'FA26', name: 'Fall 2026',   start: '2026-08-26', end: '2026-12-18' }, // current semester
-  { id: 'SP27', name: 'Spring 2027', start: '2027-01-25', end: '2027-05-14' }, // next semester (registration not open yet)
+  // Next semester. Registration opened Oct 1, 2026 (A-R25), so students can add and drop Spring 2027 sections now.
+  { id: 'SP27', name: 'Spring 2027', start: '2027-01-25', end: '2027-05-14', addStart: '2026-10-01' },
 ];
 for (const s of SEMESTERS) {
-  const addStart = addDays(s.start, -60);
+  const addStart = s.addStart || addDays(s.start, -60);
   insert('Semester', ['semester_ID','semester_Name','start_Date','end_Date','add_Start','add_End','drop_Start','drop_End','grade_Start','grade_End'],
     [s.id, s.name, s.start, s.end, addStart, addDays(s.start, 7), addStart, addDays(s.start, 21), addDays(s.end, -7), addDays(s.end, 7)]);
 }
@@ -294,7 +295,10 @@ SEMESTERS.forEach((sem, si) => {
   for (const d of DEPTS) {
     const intro = d.ugIds.filter((c) => courses[c].level <= 2);
     const gradOffer = [d.grIds[0], d.grIds[1 + (si % 4)]];
-    const offerings = [...d.ugIds, ...intro, ...gradOffer, ...d.ugIds.filter((c) => courses[c].level === 3).slice(0, 2)];
+    // Spring 2027 is still being scheduled: 14 sections per department, which leaves teaching
+    // capacity free so an admin can create more sections (A-R25, A-R26).
+    const extra = sem.id === 'SP27' ? [] : d.ugIds.filter((c) => courses[c].level === 3).slice(0, 2);
+    const offerings = [...d.ugIds, ...intro.slice(0, sem.id === 'SP27' ? 2 : 4), ...gradOffer, ...extra];
     // Part-time faculty first so each gets exactly one section.
     const teachers = [...d.faculty.filter((f) => f.type === 'Part-time'), ...shuffle(d.faculty.filter((f) => f.type === 'Full-time'))];
     const load = new Map(teachers.map((f) => [f.id, 0]));
