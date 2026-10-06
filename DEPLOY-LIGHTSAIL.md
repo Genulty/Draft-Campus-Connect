@@ -48,5 +48,6 @@ sudo bash deploy/lightsail-setup.sh
 | Reset the database | `sudo bash deploy/reset-db.sh` |
 | Open MySQL | `sudo mysql campus_connect` |
 | Run the sample queries | `sudo mysql campus_connect < db/sample-queries.sql` |
+| Check the data against the SRS rules | `sudo mysql -t campus_connect < db/validate.sql` |
 
 Settings (port, session secret, MySQL user and password) live in `/etc/campus-connect.env`.
