@@ -107,9 +107,9 @@ DOMAIN="$(ls /etc/letsencrypt/live 2>/dev/null | grep -v README | head -1 || tru
 APP_BLOCK="    root $APP_DIR/public;
     index index.html;
 
-    # The website: HTML, CSS and JavaScript files.
+    # The website: HTML, CSS and JavaScript files. Unknown addresses get a 404.
     location / {
-        try_files \$uri /index.html;
+        try_files \$uri \$uri/ =404;
     }
 
     # The API: every /api/... request is handled by api/index.php in PHP-FPM.

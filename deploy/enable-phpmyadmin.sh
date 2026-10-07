@@ -44,7 +44,15 @@ printf 'Username: dbadmin\nPassword: %s\n' "$PASSWORD" > "$LOGIN_FILE"
 chmod 600 "$LOGIN_FILE"
 
 # Rebuild the nginx site so it includes /phpmyadmin/.
-bash "$APP_DIR/deploy/lightsail-setup.sh" | grep "Campus Connect is running" || true
+if ! bash "$APP_DIR/deploy/lightsail-setup.sh" > /tmp/campus-connect-setup.log 2>&1; then
+  tail -n 20 /tmp/campus-connect-setup.log
+  echo "Rebuilding the site failed (full output: /tmp/campus-connect-setup.log). phpMyAdmin is installed but not reachable yet." >&2
+  exit 1
+fi
+if ! grep -q 'location ^~ /phpmyadmin/' /etc/nginx/sites-available/campus-connect; then
+  echo "phpMyAdmin is missing from the nginx site config; run: sudo bash deploy/lightsail-setup.sh" >&2
+  exit 1
+fi
 
 echo
 echo "phpMyAdmin:  <your site address>/phpmyadmin/"
