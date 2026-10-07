@@ -3,7 +3,8 @@
 CS5910 System Design and Implementation — Julio Larrea, Muiz M. Onifade, Pavel Clarke.
 
 Contains the MySQL database schema, generated project data for every table, a working login screen, dashboard pages for
-each role, student sign-up and password reset, student registration (add/drop) and admin course-section creation. See [DEMO.md](DEMO.md) for the midterm demo.
+each role, student sign-up and password reset, student registration (add/drop) and admin course-section creation. See [DEMO.md](DEMO.md) for the midterm demo and
+[docs/Campus_Connect_Website_Guide.pdf](docs/Campus_Connect_Website_Guide.pdf) for a page-by-page guide to the website.
 
 ## Run it
 
