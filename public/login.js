@@ -194,6 +194,7 @@ document.getElementById('nav').addEventListener('click', (e) => {
 function showLogin() {
   dashboardPage.hidden = true;
   loginPage.hidden = false;
+  showAuthView('login-view');
   form.reset();
   message.innerHTML = '';
   history.replaceState(null, '', location.pathname);
@@ -215,6 +216,14 @@ form.addEventListener('submit', async (e) => {
       const box = document.createElement('div');
       box.className = 'error';
       box.textContent = data.error;
+      // After 3 failed attempts (or a locked account) offer a password reset.
+      if (data.canReset) {
+        const link = el('a', 'reset-link', 'Forgot your password? Reset it');
+        link.href = '#';
+        link.style.display = 'block';
+        link.addEventListener('click', (ev) => { ev.preventDefault(); openReset(form.email.value); });
+        box.append(link);
+      }
       message.appendChild(box);
       form.password.value = '';
     } else {
@@ -239,3 +248,105 @@ document.getElementById('logout').addEventListener('click', async () => {
 
 // Stay signed in after a page refresh
 fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then((d) => { if (d) showDashboard(d.user); });
+
+// ---------- Switching between sign in, sign up and password reset ----------
+const authViews = ['login-view', 'signup-view', 'signup-done', 'reset-view'];
+function showAuthView(id) {
+  for (const v of authViews) document.getElementById(v).hidden = v !== id;
+}
+document.querySelectorAll('[data-show]').forEach((a) => a.addEventListener('click', (e) => {
+  e.preventDefault();
+  if (a.dataset.show === 'signup-view') loadMajors();
+  showAuthView(a.dataset.show);
+}));
+
+function showBox(target, kind, text) {
+  target.replaceChildren(el('div', kind, text));
+}
+
+// ---------- Sign up ----------
+const signupForm = document.getElementById('signup-form');
+let majorsLoaded = false;
+async function loadMajors() {
+  if (majorsLoaded) return;
+  const { majors } = await (await fetch('/api/majors')).json();
+  const select = document.getElementById('major-select');
+  for (const m of majors) {
+    const o = el('option', null, m.major_Name);
+    o.value = m.major_ID;
+    select.append(o);
+  }
+  majorsLoaded = true;
+}
+
+let newAccountEmail = '';
+signupForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const button = signupForm.querySelector('button[type=submit]');
+  button.disabled = true;
+  const msg = document.getElementById('signup-message');
+  msg.replaceChildren();
+  try {
+    const res = await fetch('/api/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.fromEntries(new FormData(signupForm))),
+    });
+    const data = await res.json();
+    if (!res.ok) return showBox(msg, 'error', data.error);
+    newAccountEmail = data.email;
+    const facts = [['Student ID', data.id], ['Campus email', data.email], ['Name', data.name], ['Major', data.major], ['Advisor', data.advisor || 'Not assigned yet']];
+    document.getElementById('signup-facts').replaceChildren(...facts.map(([label, value]) => {
+      const card = el('div', 'stat');
+      card.append(el('span', 'stat-label', label), el('strong', 'stat-value', String(value)));
+      return card;
+    }));
+    document.getElementById('signup-sql').textContent = data.sql.join('\n');
+    signupForm.reset();
+    showAuthView('signup-done');
+  } finally {
+    button.disabled = false;
+  }
+});
+document.getElementById('signup-signin').addEventListener('click', () => {
+  showAuthView('login-view');
+  form.reset();
+  message.replaceChildren();
+  form.email.value = newAccountEmail;
+  form.password.focus();
+});
+
+// ---------- Password reset ----------
+const resetForm = document.getElementById('reset-form');
+function openReset(login) {
+  resetForm.reset();
+  document.getElementById('reset-message').replaceChildren();
+  resetForm.login.value = login;
+  showAuthView('reset-view');
+  resetForm.user_ID.focus();
+}
+resetForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const button = resetForm.querySelector('button[type=submit]');
+  button.disabled = true;
+  const msg = document.getElementById('reset-message');
+  try {
+    const res = await fetch('/api/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.fromEntries(new FormData(resetForm))),
+    });
+    const data = await res.json();
+    if (!res.ok) return showBox(msg, 'error', data.error);
+    const login = resetForm.login.value;
+    showAuthView('login-view');
+    form.reset();
+    form.email.value = login;
+    const box = el('div', 'notice', data.message);
+    box.append(el('code', 'sql', data.sql.join('\n')));
+    message.replaceChildren(box);
+    form.password.focus();
+  } finally {
+    button.disabled = false;
+  }
+});

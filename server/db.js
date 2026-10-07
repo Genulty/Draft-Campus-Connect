@@ -13,6 +13,12 @@ const config = {
 
 const db = mysql.createPool({ ...config, connectionLimit: 10, dateStrings: true });
 
+// Stored as "salt:scrypt(password)", the same format db/generate-data.js uses.
+function hashPassword(plain) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  return `${salt}:${crypto.scryptSync(plain, salt, 32).toString('hex')}`;
+}
+
 function verifyPassword(plain, stored) {
   const [salt, hash] = String(stored).split(':');
   if (!salt || !hash) return false;
@@ -21,4 +27,4 @@ function verifyPassword(plain, stored) {
   return known.length === test.length && crypto.timingSafeEqual(known, test);
 }
 
-module.exports = { db, config, verifyPassword };
+module.exports = { db, config, hashPassword, verifyPassword };

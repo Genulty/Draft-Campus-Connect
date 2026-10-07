@@ -6,6 +6,7 @@ const session = require('express-session');
 const { db, verifyPassword } = require('./db');
 const { viewsFor, buildView } = require('./views');
 const actions = require('./actions');
+const accounts = require('./accounts');
 
 const MAX_ATTEMPTS = 5;
 const app = express();
@@ -25,15 +26,16 @@ async function userInfo(id) {
   return { id: u.user_ID, name: `${u.first_Name} ${u.last_Name}`, role: u.user_Type, email: u.user_Email };
 }
 
-// Use cases: successful / unsuccessful login
+// Use cases: successful / unsuccessful login. Sign in with a campus email or a user ID.
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body || {};
-  if (!email || !password) return res.status(400).json({ error: 'Enter your email and password.' });
+  if (!email || !password) return res.status(400).json({ error: 'Enter your email (or ID) and password.' });
 
-  const [[login]] = await db.query('SELECT * FROM Login WHERE user_Email = ?', [String(email).trim()]);
+  const name = String(email).trim();
+  const [[login]] = await db.query(`SELECT * FROM Login WHERE ${/^\d+$/.test(name) ? 'user_ID' : 'user_Email'} = ?`, [name]);
   if (!login) return res.status(401).json({ error: 'Invalid email or password.' });
   if (login.lock_Var) {
-    return res.status(423).json({ error: 'This account is locked after too many failed attempts. Contact an administrator.' });
+    return res.status(423).json({ error: 'This account is locked after too many failed attempts. Reset your password to unlock it.', canReset: true });
   }
 
   if (!verifyPassword(password, login.user_Password)) {
@@ -44,6 +46,7 @@ app.post('/api/login', async (req, res) => {
       error: locked
         ? 'Invalid email or password. The account is now locked.'
         : `Invalid email or password. ${MAX_ATTEMPTS - tries} attempt(s) left before the account is locked.`,
+      canReset: tries >= accounts.RESET_AFTER,
     });
   }
 
@@ -51,6 +54,20 @@ app.post('/api/login', async (req, res) => {
   req.session.user = await userInfo(login.user_ID);
   res.json({ user: req.session.user });
 });
+
+// Student sign-up and password reset (public pages).
+app.get('/api/majors', async (req, res) => res.json({ majors: await accounts.undergraduateMajors() }));
+for (const [route, run] of [['/api/signup', accounts.signUp], ['/api/reset-password', accounts.resetPassword]]) {
+  app.post(route, async (req, res) => {
+    try {
+      res.json(await run(req.body || {}));
+    } catch (err) {
+      if (err instanceof accounts.AccountError) return res.status(422).json({ error: err.message });
+      console.error(err);
+      res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    }
+  });
+}
 
 app.post('/api/logout', (req, res) => req.session.destroy(() => res.json({ ok: true })));
 

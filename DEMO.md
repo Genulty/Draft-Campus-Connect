@@ -45,3 +45,15 @@ sudo mysql campus_connect -e "SELECT * FROM Enrollment WHERE student_ID = 100001
 sudo mysql campus_connect -e "SELECT * FROM Course_Section ORDER BY CRN DESC LIMIT 3"
 sudo mysql -t campus_connect < db/validate.sql   # every SRS rule still shows 0 violations
 ```
+
+## 6. Sign up as a new student, then reset the password
+1. On the sign-in page click **Create an account**. Enter a full name, gender, date of birth, status and major
+   (the address can stay empty) and a password, then **Create account**.
+2. The next screen shows the new **random student ID** and **campus email**, and the `INSERT` statements that ran
+   (`User`, `Login`, `Student`, `Undergraduate_Student`, `Full_Time_Undergraduate`, `Student_Major`, `Advisor`).
+3. **Sign in now** with the email or the student ID. The new student's dashboard loads from MySQL, and **Register**
+   lets them add Spring 2027 intro courses.
+4. Sign out and enter a wrong password **3 times**: a *Forgot your password? Reset it* link appears (S-R2).
+5. Verify with the student ID and date of birth (S-F2) and choose a new password. The `UPDATE Login …` that ran is
+   shown; failed attempts go back to 0 and a locked account is unlocked. Sign in with the new password.
+

@@ -23,14 +23,15 @@
     <div class="panel">
       <!-- Sign-in form -->
       <div class="card" id="login-view">
-        <div><h2>Sign in</h2><p class="muted">Use your campus email and password.</p></div>
+        <div><h2>Sign in</h2><p class="muted">Use your campus email (or ID) and password.</p></div>
         <div id="message"></div>
         <form id="login-form">
-          <label>Email<input name="email" type="email" autocomplete="username" required autofocus></label>
+          <label>Email or ID<input name="email" type="text" autocomplete="username" required autofocus></label>
           <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
           <button type="submit" class="primary">Sign in</button>
         </form>
-        <p class="muted small">Accounts lock after 5 failed attempts.</p>
+        <p class="muted small">Accounts lock after 5 failed attempts. After 3, you can reset your password.</p>
+        <p class="small">New student? <a href="#" data-show="signup-view">Create an account</a></p>
         <div class="demo small">
           <b>Test accounts</b> <span class="muted">— password <code>Campus123!</code></span>
           <div class="chips">
@@ -40,6 +41,67 @@
             <button type="button" data-email="stat@campus.edu">Stat-Dept</button>
           </div>
         </div>
+      </div>
+
+      <!-- Student sign-up -->
+      <div class="card wide" id="signup-view" hidden>
+        <div><h2>Create a student account</h2><p class="muted">Your account is saved in the campus database. You will get a student ID and campus email.</p></div>
+        <div id="signup-message"></div>
+        <form id="signup-form">
+          <div class="row3">
+            <label>First name<input name="first_Name" required maxlength="50" autocomplete="given-name"></label>
+            <label><span>Middle name <span class="opt">optional</span></span><input name="middle_Name" maxlength="50" autocomplete="additional-name"></label>
+            <label>Last name<input name="last_Name" required maxlength="50" autocomplete="family-name"></label>
+          </div>
+          <div class="row3">
+            <label>Gender<select name="gender" required><option value="">Choose…</option><option>Female</option><option>Male</option><option>Other</option></select></label>
+            <label>Date of birth<input name="DOB" type="date" required></label>
+            <label>Status<select name="type"><option>Full-time</option><option>Part-time</option></select></label>
+          </div>
+          <label>Major<select name="major_ID" id="major-select" required><option value="">Choose…</option></select></label>
+          <fieldset>
+            <legend>Address <span class="opt">optional</span></legend>
+            <label>Street<input name="street" maxlength="100" autocomplete="street-address"></label>
+            <div class="row3">
+              <label>City<input name="city" maxlength="50" autocomplete="address-level2"></label>
+              <label>State<input name="state" maxlength="2" placeholder="NY" autocomplete="address-level1"></label>
+              <label>ZIP<input name="zip_Code" maxlength="5" inputmode="numeric" autocomplete="postal-code"></label>
+            </div>
+          </fieldset>
+          <div class="row2">
+            <label>Password<input name="password" type="password" required minlength="8" autocomplete="new-password"></label>
+            <label>Confirm password<input name="confirm" type="password" required minlength="8" autocomplete="new-password"></label>
+          </div>
+          <p class="muted small">At least 8 characters, with a letter and a number.</p>
+          <button type="submit" class="primary">Create account</button>
+        </form>
+        <p class="small"><a href="#" data-show="login-view">Back to sign in</a></p>
+      </div>
+
+      <!-- Sign-up result -->
+      <div class="card wide" id="signup-done" hidden>
+        <div><h2>Account created</h2><p class="muted">Write these down. You can sign in with either one.</p></div>
+        <div class="stats" id="signup-facts"></div>
+        <div class="table-card">
+          <div class="table-head"><h3>Saved to the database</h3><span class="muted small">MySQL statements that ran</span></div>
+          <code class="sql query" id="signup-sql"></code>
+        </div>
+        <button type="button" class="primary" id="signup-signin">Sign in now</button>
+      </div>
+
+      <!-- Password reset -->
+      <div class="card" id="reset-view" hidden>
+        <div><h2>Reset your password</h2><p class="muted">Confirm it is you with your ID and date of birth.</p></div>
+        <div id="reset-message"></div>
+        <form id="reset-form">
+          <label>Email or ID<input name="login" type="text" required></label>
+          <label>Student / user ID<input name="user_ID" inputmode="numeric" required></label>
+          <label>Date of birth<input name="DOB" type="date" required></label>
+          <label>New password<input name="password" type="password" required minlength="8" autocomplete="new-password"></label>
+          <label>Confirm new password<input name="confirm" type="password" required minlength="8" autocomplete="new-password"></label>
+          <button type="submit" class="primary">Reset password</button>
+        </form>
+        <p class="small"><a href="#" data-show="login-view">Back to sign in</a></p>
       </div>
 
     </div>
