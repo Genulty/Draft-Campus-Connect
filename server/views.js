@@ -12,13 +12,6 @@ async function one(sql, params = []) {
   const [[row]] = await db.query(sql, params);
   return row || {};
 }
-// A table that also shows the SQL that produced it, so a viewer can see the raw database rows.
-async function sqlTable(title, sql, params, note) {
-  const block = await table(title, sql, params, note);
-  let shown = sql;
-  for (const p of params) shown = shown.replace('?', typeof p === 'number' ? String(p) : `'${p}'`);
-  return { ...block, sql: shown.replace(/\s+/g, ' ').trim() };
-}
 const stats = (items) => ({ type: 'stats', items: items.map(([label, value]) => ({ label, value: value ?? '—' })) });
 
 // The current semester is the latest one that has started; the next is the first one that hasn't.
@@ -97,11 +90,11 @@ const VIEWS = [
   { id: 'schedule', label: 'My schedule', roles: ['Student'], async build(u) {
     const cur = await currentSemester();
     const next = await nextSemester();
-    const blocks = [await table(`${cur.name} (current semester) · S-R4`, `SELECT ${SECTION_COLUMNS}, ${INSTRUCTOR} FROM Enrollment e
+    const blocks = [await table(`${cur.name} (current semester)`, `SELECT ${SECTION_COLUMNS}, ${INSTRUCTOR} FROM Enrollment e
       JOIN Course_Section cs ON cs.CRN = e.CRN ${SECTION_JOINS}
       WHERE e.student_ID = ? AND cs.semester_ID = ? ${ORDER_BY_TIME}`, [u.id, cur.id])];
     if (next.id) {
-      blocks.push(await table(`${next.name} (next semester) · S-R5`, `SELECT ${SECTION_COLUMNS}, ${INSTRUCTOR} FROM Enrollment e
+      blocks.push(await table(`${next.name} (next semester)`, `SELECT ${SECTION_COLUMNS}, ${INSTRUCTOR} FROM Enrollment e
         JOIN Course_Section cs ON cs.CRN = e.CRN ${SECTION_JOINS}
         WHERE e.student_ID = ? AND cs.semester_ID = ? ${ORDER_BY_TIME}`, [u.id, next.id], 'Add or drop sections on the Register page.'));
     }
@@ -112,7 +105,7 @@ const VIEWS = [
         SUM(IF(h.grade <> 'F', c.course_Credits, 0)) AS earned, COUNT(*) AS courses
       FROM Student_History h JOIN Course_Section cs ON cs.CRN = h.CRN JOIN Course c ON c.course_ID = cs.course_ID
       WHERE h.student_ID = ?`, [u.id]);
-    return { title: 'Unofficial transcript', subtitle: 'S-R7, S-R8', blocks: [
+    return { title: 'Unofficial transcript', blocks: [
       stats([['Cumulative GPA', gpa.gpa], ['Credits earned', gpa.earned], ['Courses completed', gpa.courses]]),
       await table('Completed courses', `SELECT sem.semester_Name AS Semester, cs.course_ID AS Course, c.course_Name AS Title,
           c.course_Credits AS Credits, h.grade AS Grade
@@ -123,9 +116,9 @@ const VIEWS = [
   } },
   { id: 'holds-advisors', label: 'Holds & advisors', roles: ['Student'], async build(u) {
     return { title: 'Holds & advisors', blocks: [
-      await table('Active holds · S-R6', `SELECT h.hold_Type AS Hold, DATE_FORMAT(sh.hold_Date, '%b %e, %Y') AS \`Placed on\`
-        FROM Student_Hold sh JOIN Hold h ON h.hold_ID = sh.hold_ID WHERE sh.student_ID = ?`, [u.id], 'A student with an active hold cannot register (S-F3).'),
-      await table('My advisors · S-R10', `SELECT CONCAT(u.first_Name, ' ', u.last_Name) AS Advisor, f.\`rank\` AS \`Rank\`,
+      await table('Active holds', `SELECT h.hold_Type AS Hold, DATE_FORMAT(sh.hold_Date, '%b %e, %Y') AS \`Placed on\`
+        FROM Student_Hold sh JOIN Hold h ON h.hold_ID = sh.hold_ID WHERE sh.student_ID = ?`, [u.id], 'A student with an active hold cannot register.'),
+      await table('My advisors', `SELECT CONCAT(u.first_Name, ' ', u.last_Name) AS Advisor, f.\`rank\` AS \`Rank\`,
           (SELECT GROUP_CONCAT(d.dept_Name SEPARATOR ', ') FROM Faculty_Department fd JOIN Department d ON d.dept_ID = fd.dept_ID WHERE fd.faculty_ID = f.faculty_ID) AS Department,
           l.user_Email AS Email, CONCAT(o.building_ID, '-', o.room_No) AS Office
         FROM Advisor a JOIN Faculty f ON f.faculty_ID = a.faculty_ID JOIN User u ON u.user_ID = f.faculty_ID
@@ -148,11 +141,11 @@ const VIEWS = [
     const blocks = [
       stats([['Rank', f.rank], ['Type', f.faculty_Type], ['Department(s)', f.depts], ['Office', f.office],
         [`${cur.name} sections`, mine.length], ['Advisees', advisees.n]]),
-      await table(`${cur.name} teaching schedule · F-R8`, `SELECT ${SECTION_COLUMNS}, ${SEATS} FROM Course_Section cs ${SECTION_JOINS}
+      await table(`${cur.name} teaching schedule`, `SELECT ${SECTION_COLUMNS}, ${SEATS} FROM Course_Section cs ${SECTION_JOINS}
         WHERE cs.faculty_ID = ? AND cs.semester_ID = ? ${ORDER_BY_TIME}`, [u.id, cur.id]),
     ];
     for (const s of mine) {
-      blocks.push(await table(`Roster: ${s.course_ID} (CRN ${s.CRN}) · F-R10`, `SELECT u.user_ID AS \`Student ID\`,
+      blocks.push(await table(`Roster: ${s.course_ID} (CRN ${s.CRN})`, `SELECT u.user_ID AS \`Student ID\`,
           CONCAT(u.first_Name, ' ', u.last_Name) AS Student, st.student_Year AS Year, l.user_Email AS Email,
           CONCAT(ROUND(100 * AVG(a.attendance_Status = 'Present')), '%') AS Attendance
         FROM Enrollment e JOIN User u ON u.user_ID = e.student_ID JOIN Student st ON st.student_ID = e.student_ID
@@ -161,13 +154,13 @@ const VIEWS = [
         WHERE e.CRN = ? GROUP BY u.user_ID, st.student_Year, l.user_Email ORDER BY u.last_Name`, [s.CRN]));
     }
     if (next.id) {
-      blocks.push(await table(`${next.name} teaching schedule · F-R9`, `SELECT ${SECTION_COLUMNS} FROM Course_Section cs ${SECTION_JOINS}
+      blocks.push(await table(`${next.name} teaching schedule`, `SELECT ${SECTION_COLUMNS} FROM Course_Section cs ${SECTION_JOINS}
         WHERE cs.faculty_ID = ? AND cs.semester_ID = ? ${ORDER_BY_TIME}`, [u.id, next.id]));
     }
     return { title: `Welcome, ${u.name}`, subtitle: f.specialty ? `Specialty: ${f.specialty}` : '', blocks };
   } },
   { id: 'advisees', label: 'Advisees', roles: ['Faculty'], async build(u) {
-    return { title: 'My advisees', subtitle: 'F-R12 · full-time faculty advise at most 15 students (F-F9)', blocks: [
+    return { title: 'My advisees', subtitle: 'Full-time faculty advise at most 15 students.', blocks: [
       await table('Advisees', `SELECT st.student_ID AS \`Student ID\`, CONCAT(u.first_Name, ' ', u.last_Name) AS Student,
           st.student_Type AS Level, st.student_Year AS Year,
           (SELECT GROUP_CONCAT(m.major_Name SEPARATOR ', ') FROM Student_Major sm JOIN Major m ON m.major_ID = sm.major_ID WHERE sm.student_ID = st.student_ID) AS Major,
@@ -189,7 +182,7 @@ const VIEWS = [
         (SELECT COUNT(*) FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN WHERE cs.semester_ID = ?) AS enrollments,
         (SELECT COUNT(DISTINCT student_ID) FROM Student_Hold) AS holds,
         (SELECT COUNT(*) FROM Login WHERE lock_Var = 1) AS locked`, [cur.id, cur.id]);
-    return { title: `Welcome, ${u.name}`, subtitle: `${a.security_Level} administrator (A-R2)`, blocks: [
+    return { title: `Welcome, ${u.name}`, subtitle: `${a.security_Level} administrator`, blocks: [
       stats([['Students', c.students], ['Faculty', c.faculty], ['Departments', c.depts], ['Courses', c.courses],
         [`${cur.name} sections`, c.sections], [`${cur.name} enrollments`, c.enrollments], ['Students with holds', c.holds], ['Locked accounts', c.locked]]),
       await table('Departments', `SELECT d.dept_ID AS ID, d.dept_Name AS Department, CONCAT(u.first_Name, ' ', u.last_Name) AS Chair,
@@ -208,7 +201,7 @@ const VIEWS = [
     ] };
   } },
   { id: 'audit', label: 'Audit log', roles: ['Admin'], async build() {
-    return { title: 'Audit log', subtitle: 'A-R43, A-R44 · every admin update to user information', blocks: [
+    return { title: 'Audit log', subtitle: 'Every admin update to user information.', blocks: [
       await table('Entries', `SELECT l.log_ID AS \`#\`, DATE_FORMAT(l.date_Time, '%b %e, %Y %l:%i %p') AS \`Date & time\`,
           CONCAT(au.first_Name, ' ', au.last_Name) AS Admin, CONCAT(uu.first_Name, ' ', uu.last_Name, ' (', l.user_ID, ')') AS \`Affected user\`,
           l.action_Type AS Action, l.field_Name AS Field, l.old_Value AS \`Old value\`, l.new_Value AS \`New value\`
@@ -228,12 +221,12 @@ const VIEWS = [
         (SELECT COUNT(*) FROM Course_Section WHERE semester_ID = ?) AS sections,
         (SELECT SUM(max_Seats) FROM Course_Section WHERE semester_ID = ?) AS seats,
         (SELECT COUNT(*) FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN WHERE cs.semester_ID = ?) AS filled`, [cur.id, cur.id, cur.id]);
-    return { title: `Welcome, ${u.name}`, subtitle: 'Aggregate data only: no student is identified (SD-R12, SD-F5)', blocks: [
+    return { title: `Welcome, ${u.name}`, subtitle: 'Aggregate data only: no student is identified.', blocks: [
       stats([['Undergraduate students', c.ug], ['Graduate students', c.gr], ['Full-time faculty', c.ft], ['Part-time faculty', c.pt],
         [`${cur.name} sections`, c.sections], [`${cur.name} seats filled`, `${c.filled} of ${c.seats}`]]),
-      await table(`Students per major · SD-R7`, `SELECT m.major_Name AS Major, COUNT(sm.student_ID) AS Students
+      await table('Students per major', `SELECT m.major_Name AS Major, COUNT(sm.student_ID) AS Students
         FROM Major m LEFT JOIN Student_Major sm ON sm.major_ID = m.major_ID GROUP BY m.major_ID, m.major_Name ORDER BY Students DESC`),
-      await table(`Grades by department · SD-R10`, `SELECT d.dept_Name AS Department, COUNT(*) AS Grades,
+      await table('Grades by department', `SELECT d.dept_Name AS Department, COUNT(*) AS Grades,
           ROUND(AVG(${GPA_POINTS}), 2) AS \`Avg grade points\`,
           SUM(h.grade LIKE 'A%') AS A, SUM(h.grade LIKE 'B%') AS B, SUM(h.grade LIKE 'C%') AS C,
           SUM(h.grade LIKE 'D%') AS D, SUM(h.grade = 'F') AS F
@@ -243,7 +236,7 @@ const VIEWS = [
   } },
   { id: 'enrollment-counts', label: 'Enrollment counts', roles: ['StatDept'], async build(u, q) {
     const f = await semesterFilter(q);
-    return { title: 'Enrollment counts', subtitle: 'SD-R5, SD-R8 · number of students per section, without names', blocks: [
+    return { title: 'Enrollment counts', subtitle: 'Number of students per section, without names.', blocks: [
       f.block,
       await table('Sections', `SELECT cs.CRN, cs.course_ID AS Course, c.course_Name AS Title, cs.section_No AS Section,
           COUNT(e.student_ID) AS Registered, cs.max_Seats AS \`Max seats\`, cs.max_Seats - COUNT(e.student_ID) AS Available
@@ -254,11 +247,11 @@ const VIEWS = [
     ] };
   } },
 
-  // ---------------- Registration (S-R22, S-R23) ----------------
+  // ---------------- Registration ----------------
   { id: 'register', label: 'Register', roles: ['Student'], async build(u, q) {
     const [open] = await db.query(`SELECT semester_ID, semester_Name, add_Start, add_End, drop_Start, drop_End FROM Semester
       WHERE CURDATE() BETWEEN add_Start AND add_End ORDER BY start_Date`);
-    if (!open.length) return { title: 'Register', subtitle: 'No semester is open for registration right now (S-F12).', blocks: [] };
+    if (!open.length) return { title: 'Register', subtitle: 'No semester is open for registration right now.', blocks: [] };
     const sem = open.find((x) => x.semester_ID === q.semester) || open[open.length - 1];
     const [depts] = await db.query('SELECT dept_ID, dept_Name FROM Department ORDER BY dept_Name');
     const me = await one(`SELECT COALESCE(ug.dept_ID, g.dept_ID) AS dept, COALESCE(ug.undergraduate_Student_Type, g.graduate_Student_Type) AS load_type,
@@ -289,11 +282,11 @@ const VIEWS = [
       action: { label: 'Add', endpoint: 'add-section', column: 'CRN' } };
     const keep = ['CRN', 'Course', 'Title', 'Section'].map((c) => offered.columns.indexOf(c));
     const blocked = { type: 'table', title: "Sections you can't add",
-      note: 'Each one breaks a registration rule. Try still sends the request, so you can see the system refuse it.',
+      note: 'Each one breaks a registration rule. Try sends the request anyway, so you can see it refused.',
       columns: [...keep.map((i) => offered.columns[i]), 'Reason'],
       rows: offered.rows.flatMap((row, i) => (reasons[i] ? [[...keep.map((k) => row[k]), reasons[i]]] : [])),
       action: { label: 'Try', endpoint: 'add-section', column: 'CRN', style: 'secondary' } };
-    return { title: `Register for ${sem.semester_Name}`, subtitle: 'S-R22 add a course section · S-R23 drop a course section', blocks: [
+    return { title: `Register for ${sem.semester_Name}`, subtitle: 'Add and drop course sections.', blocks: [
       { type: 'filters', filters: [
         { name: 'semester', label: 'Semester', value: sem.semester_ID, options: open.map((x) => [x.semester_ID, x.semester_Name]) },
         { name: 'dept', label: 'Department', value: deptId, options: depts.map((d) => [d.dept_ID, d.dept_Name]) },
@@ -303,13 +296,10 @@ const VIEWS = [
       mine,
       available,
       blocked,
-      await sqlTable('Database: Enrollment table', `SELECT e.student_ID, e.CRN, e.grade FROM Enrollment e
-        WHERE e.student_ID = ? AND e.CRN IN (SELECT CRN FROM Course_Section WHERE semester_ID = ?) ORDER BY e.CRN`, [u.id, sem.semester_ID],
-        'The rows stored in MySQL for you this semester. Add or drop a section and this updates.'),
     ] };
   } },
 
-  // ---------------- Admin: create a course section (A-R26) ----------------
+  // ---------------- Admin: create a course section ----------------
   { id: 'create-section', label: 'Create section', roles: ['Admin'], async build(u, q) {
     const [sems] = await db.query('SELECT semester_ID, semester_Name FROM Semester WHERE start_Date > CURDATE() ORDER BY start_Date');
     if (!sems.length) return { title: 'Create a course section', subtitle: 'There is no upcoming semester.', blocks: [] };
@@ -327,7 +317,7 @@ const VIEWS = [
     const [rooms] = await db.query(`SELECT r.room_ID, b.building_Name, r.room_No, r.room_Type, r.capacity FROM Room r
       JOIN Building b ON b.building_ID = r.building_ID ORDER BY r.room_ID`);
     const v = (name, fallback) => q[name] ?? fallback;
-    return { title: 'Create a course section', subtitle: 'A-R26 · checked against A-F4 to A-F9 before it is saved', blocks: [
+    return { title: 'Create a course section', blocks: [
       { type: 'form', title: `New section for ${sem.semester_Name}`, endpoint: 'create-section', submit: 'Create section', fields: [
         { name: 'semester_ID', label: 'Semester', value: sem.semester_ID, options: sems.map((x) => [x.semester_ID, x.semester_Name]), reload: true },
         { name: 'course_ID', label: 'Course', value: v('course_ID', 'CS455'), options: courses.map((c) => [c.course_ID, `${c.course_ID} ${c.course_Name}`]) },
@@ -337,15 +327,15 @@ const VIEWS = [
         { name: 'room_ID', label: 'Room', value: v('room_ID', rooms[0].room_ID), options: rooms.map((r) => [r.room_ID, `${r.building_Name} ${r.room_No} (${r.room_Type}, ${r.capacity} seats)`]) },
         { name: 'max_Seats', label: 'Max seats', type: 'number', min: 1, max: 10, value: v('max_Seats', '10') },
       ] },
-      await sqlTable('Database: newest Course_Section rows', 'SELECT * FROM Course_Section WHERE semester_ID = ? ORDER BY CRN DESC LIMIT 5', [sem.semester_ID],
-        'The newest rows in MySQL. A section you create appears here at the top.'),
+      await table(`Newest ${sem.semester_Name} sections`, `SELECT ${SECTION_COLUMNS}, ${INSTRUCTOR} FROM Course_Section cs ${SECTION_JOINS}
+        WHERE cs.semester_ID = ? ORDER BY cs.CRN DESC LIMIT 5`, [sem.semester_ID]),
     ] };
   } },
 
   // ---------------- Everyone ----------------
   { id: 'master-schedule', label: 'Master schedule', roles: ['Faculty', 'Admin', 'Student'], async build(u, q) {
     const f = await semesterFilter(q);
-    return { title: 'Semester master schedule', subtitle: 'F-R13 – F-R19', blocks: [
+    return { title: 'Semester master schedule', blocks: [
       f.block,
       await table('Course sections', `SELECT ${SECTION_COLUMNS}, ${INSTRUCTOR}, ${SEATS}
         FROM Course_Section cs ${SECTION_JOINS}
@@ -356,7 +346,7 @@ const VIEWS = [
   { id: 'catalog', label: 'Course catalog', roles: ['Student', 'Faculty', 'Admin', 'StatDept'], async build(u, q) {
     const [depts] = await db.query('SELECT dept_ID, dept_Name FROM Department ORDER BY dept_Name');
     const deptId = depts.some((d) => d.dept_ID === q.dept) ? q.dept : depts[0].dept_ID;
-    return { title: 'Course catalog', subtitle: 'S-R12 – S-R18, F-R20 – F-R26', blocks: [
+    return { title: 'Course catalog', blocks: [
       { type: 'filters', filters: [{ name: 'dept', label: 'Department', value: deptId, options: depts.map((d) => [d.dept_ID, d.dept_Name]) }] },
       await table('Courses', `SELECT c.course_ID AS Course, c.course_Name AS Title, c.course_Credits AS Credits, c.course_Type AS Level,
           COALESCE((SELECT GROUP_CONCAT(CONCAT(cp.prerequisite_Course_ID, ' (min ', cp.min_Grade_Req, ')') SEPARATOR ', ')

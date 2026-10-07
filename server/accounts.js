@@ -1,5 +1,4 @@
-// Student sign-up and password reset. Both write to MySQL in a transaction and return
-// the SQL they ran, so the page can show exactly what changed in the database.
+// Student sign-up and password reset.
 const crypto = require('crypto');
 const { db, hashPassword } = require('./db');
 
@@ -15,16 +14,6 @@ function checkPassword(password, confirm) {
     fail('Password must be at least 8 characters and include a letter and a number.');
   }
   if (password !== confirm) fail('The two passwords do not match.');
-}
-
-// Shows a value the way it would appear in SQL (the password hash is shortened).
-function sqlValues(values) {
-  return values.map((v) => {
-    if (v === null || v === undefined) return 'NULL';
-    if (typeof v === 'number') return String(v);
-    const s = String(v);
-    return `'${(/^[0-9a-f]{32}:[0-9a-f]{64}$/.test(s) ? `${s.slice(0, 12)}…` : s).replace(/'/g, "''")}'`;
-  }).join(', ');
 }
 
 async function transaction(work) {
@@ -64,11 +53,8 @@ async function signUp(form) {
 
   return transaction(async (conn) => {
     const q = async (sql, params) => (await conn.query(sql, params))[0];
-    const sql = [];
-    const run = async (table, cols, values) => {
-      await q(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, values);
-      sql.push(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${sqlValues(values)});`);
-    };
+    const run = (table, cols, values) =>
+      q(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, values);
 
     const [major] = await q(`SELECT m.major_ID, m.major_Name, m.dept_ID FROM Major m
       WHERE m.major_ID = ? AND m.major_ID IN (SELECT major_ID FROM Major_Course_Requirement r JOIN Course c ON c.course_ID = r.course_ID
@@ -108,7 +94,7 @@ async function signUp(form) {
       HAVING n < ? ORDER BY n, f.faculty_ID LIMIT 1 FOR UPDATE`, [major.dept_ID, MAX_ADVISEES]);
     if (advisor) await run('Advisor', ['faculty_ID', 'student_ID', 'date_Of_Appointment'], [advisor.faculty_ID, id, today]);
 
-    return { id, email, name: `${first} ${last}`, major: major.major_Name, advisor: advisor ? advisor.name : null, sql };
+    return { id, email, name: `${first} ${last}`, major: major.major_Name, advisor: advisor ? advisor.name : null };
   });
 }
 
@@ -128,17 +114,14 @@ async function resetPassword(form) {
   if (String(form.user_ID).trim() !== String(login.user_ID) || String(form.DOB).trim() !== login.DOB) {
     const count = (block && block.until > Date.now() ? block.count : 0) + 1;
     verifyFailures.set(login.user_ID, { count, until: Date.now() + 15 * 60 * 1000 });
-    fail('The ID and date of birth do not match this account (S-F2).');
+    fail('The ID and date of birth do not match this account.');
   }
   checkPassword(form.password, form.confirm);
 
   const hash = hashPassword(form.password);
   await db.query('UPDATE Login SET user_Password = ?, no_Of_Tries = 0, lock_Var = 0 WHERE user_ID = ?', [hash, login.user_ID]);
   verifyFailures.delete(login.user_ID);
-  return {
-    message: 'Your password was reset and the account is unlocked. You can sign in now.',
-    sql: [`UPDATE Login SET user_Password = ${sqlValues([hash])}, no_Of_Tries = 0, lock_Var = 0 WHERE user_ID = ${login.user_ID};`],
-  };
+  return { message: 'Your password was reset and the account is unlocked. You can sign in now.' };
 }
 
 // Undergraduate majors for the sign-up form.

@@ -44,10 +44,9 @@ async function openView(id, params = {}, flash = null) {
   blocks.replaceChildren(...(flash ? [renderFlash(flash)] : []), ...(page.blocks || []).map((b) => renderBlock(b, id)));
 }
 
-function renderFlash({ ok, message, sql }) {
+function renderFlash({ ok, message }) {
   const box = el('div', ok ? 'flash ok' : 'flash err');
-  box.append(el('strong', null, ok ? 'Saved to the database' : 'Not allowed'), el('span', null, message));
-  if (sql) box.append(el('code', 'sql', sql));
+  box.append(el('strong', null, ok ? 'Done' : 'Not allowed'), el('span', null, message));
   return box;
 }
 
@@ -60,7 +59,7 @@ async function runAction(endpoint, body) {
   });
   if (res.status === 401) return showLogin();
   const data = await res.json();
-  await openView(currentView, currentParams, res.ok ? { ok: true, message: data.message, sql: data.sql } : { ok: false, message: data.error });
+  await openView(currentView, currentParams, res.ok ? { ok: true, message: data.message } : { ok: false, message: data.error });
   document.querySelector('.content').scrollIntoView({ behavior: 'smooth' });
 }
 
@@ -148,7 +147,6 @@ function renderBlock(block, viewId) {
   head.append(el('h3', null, block.title), el('span', 'muted small', `${block.rows.length} row${block.rows.length === 1 ? '' : 's'}`));
   card.append(head);
   if (block.note) card.append(el('p', 'muted small note', block.note));
-  if (block.sql) card.append(el('code', 'sql query', block.sql));
   if (!block.rows.length) {
     card.append(el('p', 'muted empty-row', 'Nothing to show.'));
     return card;
@@ -301,7 +299,6 @@ signupForm.addEventListener('submit', async (e) => {
       card.append(el('span', 'stat-label', label), el('strong', 'stat-value', String(value)));
       return card;
     }));
-    document.getElementById('signup-sql').textContent = data.sql.join('\n');
     signupForm.reset();
     showAuthView('signup-done');
   } finally {
@@ -342,9 +339,7 @@ resetForm.addEventListener('submit', async (e) => {
     showAuthView('login-view');
     form.reset();
     form.email.value = login;
-    const box = el('div', 'notice', data.message);
-    box.append(el('code', 'sql', data.sql.join('\n')));
-    message.replaceChildren(box);
+    message.replaceChildren(el('div', 'notice', data.message));
     form.password.focus();
   } finally {
     button.disabled = false;
