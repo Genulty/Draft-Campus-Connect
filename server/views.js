@@ -2,6 +2,7 @@
 // { title, subtitle, blocks }, where a block is a row of stat cards, a set of
 // filters, or a table. The browser renders them generically (public/login.js).
 const { db } = require('./db');
+const { whyCannotAdd } = require('./actions');
 
 async function table(title, sql, params = [], note) {
   const [rows, fields] = await db.query(sql, params);
@@ -273,14 +274,25 @@ const VIEWS = [
       JOIN Course_Section cs ON cs.CRN = e.CRN ${SECTION_JOINS}
       WHERE e.student_ID = ? AND cs.semester_ID = ? ${ORDER_BY_TIME}`, [u.id, sem.semester_ID]);
     mine.action = { label: 'Drop', endpoint: 'drop-section', column: 'CRN', style: 'danger' };
-    const available = await table(`Sections you can add`, `SELECT ${SECTION_COLUMNS}, ${INSTRUCTOR}, ${SEATS},
+    const offered = await table('Sections you can add', `SELECT ${SECTION_COLUMNS}, ${INSTRUCTOR}, ${SEATS},
         COALESCE((SELECT GROUP_CONCAT(cp.prerequisite_Course_ID SEPARATOR ', ') FROM Course_Prerequisite cp WHERE cp.course_ID = c.course_ID), '—') AS Prerequisites
       FROM Course_Section cs ${SECTION_JOINS}
       WHERE cs.semester_ID = ? AND c.dept_ID = ? AND c.course_Type = ?
         AND cs.CRN NOT IN (SELECT CRN FROM Enrollment WHERE student_ID = ?)
       ORDER BY cs.course_ID, cs.section_No`, [sem.semester_ID, deptId, me.student_Type, u.id],
-      'Every rule is checked when you click Add: holds, prerequisites, seats, credit limit, time conflicts and courses already passed.');
-    available.action = { label: 'Add', endpoint: 'add-section', column: 'CRN' };
+      'These sections pass every registration rule for you: holds, prerequisites, seats, credit limit, time conflicts and courses already passed.');
+    // Split the department's sections with the same rule check the Add button runs.
+    const crnAt = offered.columns.indexOf('CRN');
+    const reasons = [];
+    for (const row of offered.rows) reasons.push(await whyCannotAdd(u.id, row[crnAt]));
+    const available = { ...offered, rows: offered.rows.filter((_, i) => !reasons[i]),
+      action: { label: 'Add', endpoint: 'add-section', column: 'CRN' } };
+    const keep = ['CRN', 'Course', 'Title', 'Section'].map((c) => offered.columns.indexOf(c));
+    const blocked = { type: 'table', title: "Sections you can't add",
+      note: 'Each one breaks a registration rule. Try still sends the request, so you can see the system refuse it.',
+      columns: [...keep.map((i) => offered.columns[i]), 'Reason'],
+      rows: offered.rows.flatMap((row, i) => (reasons[i] ? [[...keep.map((k) => row[k]), reasons[i]]] : [])),
+      action: { label: 'Try', endpoint: 'add-section', column: 'CRN', style: 'secondary' } };
     return { title: `Register for ${sem.semester_Name}`, subtitle: 'S-R22 add a course section · S-R23 drop a course section', blocks: [
       { type: 'filters', filters: [
         { name: 'semester', label: 'Semester', value: sem.semester_ID, options: open.map((x) => [x.semester_ID, x.semester_Name]) },
@@ -290,6 +302,7 @@ const VIEWS = [
         ['Add period', `${fmt(sem.add_Start)} – ${fmt(sem.add_End)}`], ['Drop period', `${fmt(sem.drop_Start)} – ${fmt(sem.drop_End)}`]]),
       mine,
       available,
+      blocked,
       await sqlTable('Database: Enrollment table', `SELECT e.student_ID, e.CRN, e.grade FROM Enrollment e
         WHERE e.student_ID = ? AND e.CRN IN (SELECT CRN FROM Course_Section WHERE semester_ID = ?) ORDER BY e.CRN`, [u.id, sem.semester_ID],
         'The rows stored in MySQL for you this semester. Add or drop a section and this updates.'),

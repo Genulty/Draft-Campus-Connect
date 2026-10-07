@@ -32,55 +32,71 @@ async function transaction(work) {
 }
 
 // ---------- Student: add a course section (S-R22, UC-24/25) ----------
+// Throws a RuleError naming the broken rule, or returns the section if the student may add it.
+// `lock` locks the section row so two students can't take the last seat at the same time.
+async function checkAdd(q, studentId, crn, lock) {
+  const [sec] = await q(`SELECT cs.*, c.course_Name, c.course_Credits, c.course_Type, s.semester_Name,
+      CURDATE() BETWEEN s.add_Start AND s.add_End AS add_open, s.add_Start, s.add_End
+    FROM Course_Section cs JOIN Course c ON c.course_ID = cs.course_ID JOIN Semester s ON s.semester_ID = cs.semester_ID
+    WHERE cs.CRN = ?${lock ? ' FOR UPDATE' : ''}`, [crn]);
+  if (!sec) fail('That course section does not exist.');
+  const label = `${sec.course_ID} ${sec.course_Name} (CRN ${sec.CRN})`;
+
+  const [stu] = await q(`SELECT s.student_Type, COALESCE(u.undergraduate_Student_Type, g.graduate_Student_Type) AS load_type
+    FROM Student s LEFT JOIN Undergraduate_Student u ON u.student_ID = s.student_ID
+    LEFT JOIN Graduate_Student g ON g.student_ID = s.student_ID WHERE s.student_ID = ?`, [studentId]);
+
+  if (!sec.add_open) fail(`S-F12: the add period for ${sec.semester_Name} is ${sec.add_Start} to ${sec.add_End}.`);
+  const holds = await q(`SELECT h.hold_Type FROM Student_Hold sh JOIN Hold h ON h.hold_ID = sh.hold_ID WHERE sh.student_ID = ?`, [studentId]);
+  if (holds.length) fail(`S-F3: you have an active ${holds.map((h) => h.hold_Type.toLowerCase()).join(' and ')} hold.`);
+  if (sec.course_Type !== stu.student_Type) {
+    fail(stu.student_Type === 'Undergraduate' ? 'S-F5: undergraduates cannot register for graduate courses.' : 'S-F6: graduate students cannot register for undergraduate courses.');
+  }
+  const [already] = await q(`SELECT cs.CRN FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN
+    WHERE e.student_ID = ? AND cs.course_ID = ? AND cs.semester_ID = ?`, [studentId, sec.course_ID, sec.semester_ID]);
+  if (already) fail(`You are already registered for ${sec.course_ID} this semester (CRN ${already.CRN}).`);
+  const [passed] = await q(`SELECT h.grade FROM Student_History h JOIN Course_Section hc ON hc.CRN = h.CRN
+    WHERE h.student_ID = ? AND hc.course_ID = ? AND h.grade <> 'F'`, [studentId, sec.course_ID]);
+  if (passed) fail(`S-F10: you already passed ${sec.course_ID} (grade ${passed.grade}).`);
+  const [inProgress] = await q(`SELECT s.semester_Name FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN
+    JOIN Semester s ON s.semester_ID = cs.semester_ID WHERE e.student_ID = ? AND cs.course_ID = ? AND e.grade IS NULL`, [studentId, sec.course_ID]);
+  if (inProgress) fail(`You are already taking ${sec.course_ID} in ${inProgress.semester_Name}.`);
+  const missing = await q(`SELECT cp.prerequisite_Course_ID AS id, cp.min_Grade_Req AS min FROM Course_Prerequisite cp
+    WHERE cp.course_ID = ? AND NOT EXISTS (
+      SELECT 1 FROM Student_History h JOIN Course_Section hc ON hc.CRN = h.CRN
+      WHERE h.student_ID = ? AND hc.course_ID = cp.prerequisite_Course_ID
+        AND FIELD(h.grade, ${GRADE_ORDER}) >= FIELD(cp.min_Grade_Req, ${GRADE_ORDER}))`, [sec.course_ID, studentId]);
+  if (missing.length) fail(`S-F4: missing prerequisite ${missing.map((m) => `${m.id} (grade ${m.min} or better)`).join(', ')}.`);
+  const [{ taken }] = await q('SELECT COUNT(*) AS taken FROM Enrollment WHERE CRN = ?', [crn]);
+  if (taken >= sec.max_Seats) fail(`S-F9: ${label} is full (${sec.max_Seats} seats).`);
+  const [{ credits }] = await q(`SELECT COALESCE(SUM(c.course_Credits), 0) AS credits FROM Enrollment e
+    JOIN Course_Section cs ON cs.CRN = e.CRN JOIN Course c ON c.course_ID = cs.course_ID
+    WHERE e.student_ID = ? AND cs.semester_ID = ?`, [studentId, sec.semester_ID]);
+  const max = MAX_CREDITS[stu.load_type];
+  if (Number(credits) + sec.course_Credits > max) {
+    fail(`${stu.load_type === 'Full-time' ? 'S-F8' : 'S-F7'}: this would bring you to ${Number(credits) + sec.course_Credits} credits; the limit for ${stu.load_type.toLowerCase()} students is ${max}.`);
+  }
+  const [clash] = await q(`SELECT cs.course_ID, cs.CRN FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN
+    WHERE e.student_ID = ? AND cs.semester_ID = ? AND ${CLASH}`, [studentId, sec.semester_ID, sec.time_Slot_ID]);
+  if (clash) fail(`S-F11: ${label} meets at the same time as ${clash.course_ID} (CRN ${clash.CRN}).`);
+  return { sec, label };
+}
+
+// The reason a student can't add a section, or null if they can. Used to sort the Register page.
+async function whyCannotAdd(studentId, crn) {
+  try {
+    await checkAdd(async (sql, params) => (await db.query(sql, params))[0], studentId, crn, false);
+    return null;
+  } catch (err) {
+    if (err instanceof RuleError) return err.message;
+    throw err;
+  }
+}
+
 async function addSection(studentId, crn) {
   return transaction(async (conn) => {
     const q = async (sql, params) => (await conn.query(sql, params))[0];
-    // Lock the section row so two students can't take the last seat at the same time.
-    const [sec] = await q(`SELECT cs.*, c.course_Name, c.course_Credits, c.course_Type, s.semester_Name,
-        CURDATE() BETWEEN s.add_Start AND s.add_End AS add_open, s.add_Start, s.add_End
-      FROM Course_Section cs JOIN Course c ON c.course_ID = cs.course_ID JOIN Semester s ON s.semester_ID = cs.semester_ID
-      WHERE cs.CRN = ? FOR UPDATE`, [crn]);
-    if (!sec) fail('That course section does not exist.');
-    const label = `${sec.course_ID} ${sec.course_Name} (CRN ${sec.CRN})`;
-
-    const [stu] = await q(`SELECT s.student_Type, COALESCE(u.undergraduate_Student_Type, g.graduate_Student_Type) AS load_type
-      FROM Student s LEFT JOIN Undergraduate_Student u ON u.student_ID = s.student_ID
-      LEFT JOIN Graduate_Student g ON g.student_ID = s.student_ID WHERE s.student_ID = ?`, [studentId]);
-
-    if (!sec.add_open) fail(`S-F12: the add period for ${sec.semester_Name} is ${sec.add_Start} to ${sec.add_End}.`);
-    const holds = await q(`SELECT h.hold_Type FROM Student_Hold sh JOIN Hold h ON h.hold_ID = sh.hold_ID WHERE sh.student_ID = ?`, [studentId]);
-    if (holds.length) fail(`S-F3: you have an active ${holds.map((h) => h.hold_Type.toLowerCase()).join(' and ')} hold.`);
-    if (sec.course_Type !== stu.student_Type) {
-      fail(stu.student_Type === 'Undergraduate' ? 'S-F5: undergraduates cannot register for graduate courses.' : 'S-F6: graduate students cannot register for undergraduate courses.');
-    }
-    const [already] = await q(`SELECT cs.CRN FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN
-      WHERE e.student_ID = ? AND cs.course_ID = ? AND cs.semester_ID = ?`, [studentId, sec.course_ID, sec.semester_ID]);
-    if (already) fail(`You are already registered for ${sec.course_ID} this semester (CRN ${already.CRN}).`);
-    const [passed] = await q(`SELECT h.grade FROM Student_History h JOIN Course_Section hc ON hc.CRN = h.CRN
-      WHERE h.student_ID = ? AND hc.course_ID = ? AND h.grade <> 'F'`, [studentId, sec.course_ID]);
-    if (passed) fail(`S-F10: you already passed ${sec.course_ID} (grade ${passed.grade}).`);
-    const [inProgress] = await q(`SELECT s.semester_Name FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN
-      JOIN Semester s ON s.semester_ID = cs.semester_ID WHERE e.student_ID = ? AND cs.course_ID = ? AND e.grade IS NULL`, [studentId, sec.course_ID]);
-    if (inProgress) fail(`You are already taking ${sec.course_ID} in ${inProgress.semester_Name}.`);
-    const missing = await q(`SELECT cp.prerequisite_Course_ID AS id, cp.min_Grade_Req AS min FROM Course_Prerequisite cp
-      WHERE cp.course_ID = ? AND NOT EXISTS (
-        SELECT 1 FROM Student_History h JOIN Course_Section hc ON hc.CRN = h.CRN
-        WHERE h.student_ID = ? AND hc.course_ID = cp.prerequisite_Course_ID
-          AND FIELD(h.grade, ${GRADE_ORDER}) >= FIELD(cp.min_Grade_Req, ${GRADE_ORDER}))`, [sec.course_ID, studentId]);
-    if (missing.length) fail(`S-F4: missing prerequisite ${missing.map((m) => `${m.id} (grade ${m.min} or better)`).join(', ')}.`);
-    const [{ taken }] = await q('SELECT COUNT(*) AS taken FROM Enrollment WHERE CRN = ?', [crn]);
-    if (taken >= sec.max_Seats) fail(`S-F9: ${label} is full (${sec.max_Seats} seats).`);
-    const [{ credits }] = await q(`SELECT COALESCE(SUM(c.course_Credits), 0) AS credits FROM Enrollment e
-      JOIN Course_Section cs ON cs.CRN = e.CRN JOIN Course c ON c.course_ID = cs.course_ID
-      WHERE e.student_ID = ? AND cs.semester_ID = ?`, [studentId, sec.semester_ID]);
-    const max = MAX_CREDITS[stu.load_type];
-    if (Number(credits) + sec.course_Credits > max) {
-      fail(`${stu.load_type === 'Full-time' ? 'S-F8' : 'S-F7'}: this would bring you to ${Number(credits) + sec.course_Credits} credits; the limit for ${stu.load_type.toLowerCase()} students is ${max}.`);
-    }
-    const [clash] = await q(`SELECT cs.course_ID, cs.CRN FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN
-      WHERE e.student_ID = ? AND cs.semester_ID = ? AND ${CLASH}`, [studentId, sec.semester_ID, sec.time_Slot_ID]);
-    if (clash) fail(`S-F11: ${label} meets at the same time as ${clash.course_ID} (CRN ${clash.CRN}).`);
-
+    const { label } = await checkAdd(q, studentId, crn, true);
     await q('INSERT INTO Enrollment (student_ID, CRN, grade) VALUES (?, ?, NULL)', [studentId, crn]);
     return { message: `Added ${label}.`, sql: `INSERT INTO Enrollment (student_ID, CRN, grade) VALUES (${studentId}, ${crn}, NULL);` };
   });
@@ -152,4 +168,4 @@ async function createSection(adminId, form) {
   });
 }
 
-module.exports = { addSection, dropSection, createSection, RuleError };
+module.exports = { addSection, dropSection, createSection, whyCannotAdd, RuleError };

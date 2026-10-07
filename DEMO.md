@@ -19,9 +19,12 @@ shows how many attempts are left; 5 failures lock the account (UC-1, UC-2).
    lists CS455; *Database: Enrollment table* now shows the row `100001 | 10550 | —`.
 5. Open **My schedule**: CS455 appears under Spring 2027.
 
-Show a rule being enforced (UC-25): click **Add** on **CS110**. It is refused with
-`S-F10: you already passed CS110`. Other refusals you can show: a section at the same time as CS455 (S-F11),
-a MATH 3000-level course (S-F4 missing prerequisite), going over 16 credits (S-F8).
+The page splits the department's sections in two, using the same rule check as the Add button:
+**Sections you can add** (CS450, CS455 for Julio; switch Department to Mathematics, Psychology or English for electives)
+and **Sections you can't add**, each with the rule it breaks (Julio has already passed CS110–CS445, so those show S-F10).
+Show a rule being enforced (UC-25): click **Try** on **CS110**; the system refuses it with
+`S-F10: you already passed CS110`. After adding CS455, other refusals appear in that list, e.g. a section at the same
+time (S-F11), a course missing a prerequisite (S-F4), or going over 16 credits (S-F8).
 **Drop** (S-R23) removes the row again (`DELETE FROM Enrollment …`).
 
 ## 4. Faculty or Admin function

@@ -74,6 +74,8 @@ code.sql.query { margin: 0 16px 12px; background: #f4f6fa; color: #4a5570; }
 .row-action:hover { background: #1f3a68; }
 .row-action.danger { background: #fff; color: #b42318; border-color: #f0b4ad; }
 .row-action.danger:hover { background: #fdecea; }
+.row-action.secondary { background: #fff; color: #4a5570; border-color: #cfd6e3; }
+.row-action.secondary:hover { background: #f4f6fa; }
 .form-card { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 14px; }
 .form-card h3 { margin: 0; font-size: 1rem; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
