@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Sets up Campus Connect on an Amazon Lightsail Ubuntu instance.
+# Sets up Campus Connect on an Amazon Lightsail Ubuntu instance:
+# nginx serves the website (public/) and passes /api/ requests to PHP-FPM (api/index.php),
+# which talks to MySQL.
 # Run from inside the cloned repo:   sudo bash deploy/lightsail-setup.sh
 # Safe to run again after a `git pull` to redeploy.
 set -euo pipefail
@@ -10,11 +12,12 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_USER="$(stat -c %U "$APP_DIR")"
-ENV_FILE=/etc/campus-connect.env
-SERVICE=campus-connect
+SITE=campus-connect
+CONFIG_DIR=/etc/campus-connect
+CONFIG_FILE=$CONFIG_DIR/config.php
+OLD_ENV_FILE=/etc/campus-connect.env   # used by the earlier Node.js version
 
-# Small plans (512 MB) don't have enough memory for MySQL + Node; add 1 GB of swap.
+# Small plans (512 MB) don't have much memory for MySQL; add 1 GB of swap.
 MEM_MB="$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)"
 if [ "$MEM_MB" -lt 1500 ] && ! swapon --show | grep -q .; then
   echo "==> Adding 1 GB swap (only ${MEM_MB} MB RAM)"
@@ -25,21 +28,21 @@ if [ "$MEM_MB" -lt 1500 ] && ! swapon --show | grep -q .; then
   grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
 fi
 
-echo "==> Installing system packages"
+echo "==> Installing nginx, MySQL and PHP"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y curl git nginx mysql-server ca-certificates
+apt-get install -y curl git nginx mysql-server php-fpm php-mysql ca-certificates
+PHP_VERSION="$(php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;')"
+FPM_SOCKET="/run/php/php${PHP_VERSION}-fpm.sock"
+echo "PHP $PHP_VERSION"
 
-NODE_MAJOR="$(node -v 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/' || true)"
-if [ -z "$NODE_MAJOR" ] || [ "$NODE_MAJOR" -lt 18 ]; then
-  echo "==> Installing Node.js 20"
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-  apt-get install -y nodejs
+# The earlier version of this site ran on Node.js; stop and remove that service if it is still there.
+if [ -f /etc/systemd/system/$SITE.service ]; then
+  echo "==> Removing the old Node.js service"
+  systemctl disable --now $SITE || true
+  rm -f /etc/systemd/system/$SITE.service
+  systemctl daemon-reload
 fi
-echo "Node $(node -v)"
-
-echo "==> Installing app dependencies"
-sudo -u "$APP_USER" bash -c "cd '$APP_DIR' && npm ci --omit=dev"
 
 # Keep MySQL's memory use small enough for the 512 MB plan.
 cat > /etc/mysql/mysql.conf.d/zz-campus-connect.cnf <<'CNF'
@@ -51,26 +54,31 @@ CNF
 systemctl enable mysql
 systemctl restart mysql
 
-# Older installs of this script used SQLite; start the env file over for MySQL.
-if [ -f "$ENV_FILE" ] && ! grep -q '^DB_PASSWORD=' "$ENV_FILE"; then
-  rm -f "$ENV_FILE"
+# The MySQL password for the website's 'campus' user: keep the existing one, or make a new random one.
+DB_PASSWORD=""
+if [ -f "$CONFIG_FILE" ]; then
+  DB_PASSWORD="$(php -r "echo (require '$CONFIG_FILE')['password'] ?? '';")"
+elif [ -f "$OLD_ENV_FILE" ]; then
+  DB_PASSWORD="$(grep '^DB_PASSWORD=' "$OLD_ENV_FILE" | cut -d= -f2 || true)"
 fi
-if [ ! -f "$ENV_FILE" ]; then
-  echo "==> Writing $ENV_FILE"
-  cat > "$ENV_FILE" <<ENV
-NODE_ENV=production
-HOST=127.0.0.1
-PORT=3000
-DB_HOST=127.0.0.1
-DB_PORT=3306
-DB_USER=campus
-DB_PASSWORD=$(openssl rand -hex 16)
-DB_NAME=campus_connect
-SESSION_SECRET=$(openssl rand -hex 32)
-ENV
-  chmod 600 "$ENV_FILE"
-fi
-DB_PASSWORD="$(grep '^DB_PASSWORD=' "$ENV_FILE" | cut -d= -f2)"
+[ -n "$DB_PASSWORD" ] || DB_PASSWORD="$(openssl rand -hex 16)"
+
+echo "==> Writing $CONFIG_FILE (readable only by root and PHP)"
+mkdir -p "$CONFIG_DIR"
+cat > "$CONFIG_FILE" <<PHP
+<?php
+// Database settings for Campus Connect (written by deploy/lightsail-setup.sh).
+return [
+    'host' => '127.0.0.1',
+    'port' => 3306,
+    'user' => 'campus',
+    'password' => '$DB_PASSWORD',
+    'database' => 'campus_connect',
+];
+PHP
+chown root:www-data "$CONFIG_FILE"
+chmod 640 "$CONFIG_FILE"
+rm -f "$OLD_ENV_FILE"
 
 echo "==> Creating MySQL user 'campus'"
 mysql <<SQL
@@ -82,67 +90,91 @@ SQL
 
 if ! mysql -e 'USE campus_connect' 2>/dev/null; then
   echo "==> Creating the campus_connect database and loading the project data"
-  (cd "$APP_DIR" && sudo -u "$APP_USER" env $(grep -v '^#' "$ENV_FILE" | xargs) node db/load.js)
+  mysql < "$APP_DIR/db/Database_schema.sql"
+  mysql campus_connect < "$APP_DIR/db/Project_data.sql"
 else
   echo "==> Database campus_connect already exists (reload it with: sudo bash deploy/reset-db.sh)"
 fi
 
-echo "==> Creating systemd service"
-cat > /etc/systemd/system/$SERVICE.service <<UNIT
-[Unit]
-Description=Campus Connect
-After=network.target mysql.service
-Requires=mysql.service
+# nginx and PHP run as www-data and need to reach the project folder inside the home directory.
+dir="$APP_DIR"
+while [ "$dir" != "/" ]; do chmod o+x "$dir"; dir="$(dirname "$dir")"; done
+chmod -R o+rX "$APP_DIR/public" "$APP_DIR/api"
 
-[Service]
-User=$APP_USER
-WorkingDirectory=$APP_DIR
-EnvironmentFile=$ENV_FILE
-ExecStart=$(command -v node) server/index.js
-Restart=always
-RestartSec=3
+# HTTPS is used if deploy/enable-https.sh has already obtained a certificate.
+DOMAIN="$(ls /etc/letsencrypt/live 2>/dev/null | grep -v README | head -1 || true)"
 
-[Install]
-WantedBy=multi-user.target
-UNIT
-systemctl daemon-reload
-systemctl enable $SERVICE
-systemctl restart $SERVICE
+APP_BLOCK="    root $APP_DIR/public;
+    index index.html;
 
-# Keep the HTTPS config that deploy/enable-https.sh (certbot) wrote; only create the plain HTTP one.
-if grep -q 'managed by Certbot' /etc/nginx/sites-available/$SERVICE 2>/dev/null; then
-  echo "==> nginx already has HTTPS (certbot); leaving its config as is"
-else
-  echo "==> Configuring nginx on port 80"
-  cat > /etc/nginx/sites-available/$SERVICE <<'NGINX'
+    # The website: HTML, CSS and JavaScript files.
+    location / {
+        try_files \$uri /index.html;
+    }
+
+    # The API: every /api/... request is handled by api/index.php in PHP-FPM.
+    location /api/ {
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $APP_DIR/api/index.php;
+        fastcgi_param SCRIPT_NAME /api/index.php;
+        fastcgi_pass unix:$FPM_SOCKET;
+    }"
+
+# Listen on IPv6 too when the server has it.
+V6_80=""; V6_443=""
+if [ -f /proc/net/if_inet6 ]; then V6_80="listen [::]:80 default_server;"; V6_443="listen [::]:443 ssl;"; fi
+
+echo "==> Configuring nginx"
+if [ -n "$DOMAIN" ] && [ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
+  cat > /etc/nginx/sites-available/$SITE <<NGINX
 server {
     listen 80 default_server;
-    listen [::]:80 default_server;
-    server_name _;
+    $V6_80
+    server_name $DOMAIN _;
+    return 301 https://$DOMAIN\$request_uri;
+}
 
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
+server {
+    listen 443 ssl;
+    $V6_443
+    server_name $DOMAIN;
+    ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+$APP_BLOCK
 }
 NGINX
+  URL="https://$DOMAIN"
+  CHECK=(--resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/api/me")
+else
+  cat > /etc/nginx/sites-available/$SITE <<NGINX
+server {
+    listen 80 default_server;
+    $V6_80
+    server_name _;
+
+$APP_BLOCK
+}
+NGINX
+  URL="http://$(curl -fsS --max-time 3 https://checkip.amazonaws.com 2>/dev/null || echo '<your-instance-public-ip>')"
+  CHECK=("http://127.0.0.1/api/me")
 fi
-ln -sf /etc/nginx/sites-available/$SERVICE /etc/nginx/sites-enabled/$SERVICE
+ln -sf /etc/nginx/sites-available/$SITE /etc/nginx/sites-enabled/$SITE
 rm -f /etc/nginx/sites-enabled/default
 nginx -t
-systemctl enable nginx
+systemctl enable "php${PHP_VERSION}-fpm" nginx
+systemctl restart "php${PHP_VERSION}-fpm"
 systemctl reload nginx || systemctl restart nginx
 
-sleep 2
-if curl -fsS http://127.0.0.1/ > /dev/null; then
-  IP="$(curl -fsS --max-time 3 https://checkip.amazonaws.com 2>/dev/null || echo '<your-instance-public-ip>')"
+sleep 1
+# The API answers "Not logged in." (HTTP 401) when it is working.
+if curl -sk -o /dev/null -w '%{http_code}' "${CHECK[@]}" | grep -q 401; then
   echo
-  echo "Campus Connect is running: http://$IP"
-  echo "Logs:    sudo journalctl -u $SERVICE -f"
+  echo "Campus Connect is running: $URL"
+  echo "PHP errors:  sudo tail -n 50 /var/log/nginx/error.log"
 else
-  echo "The app did not answer. Check: sudo journalctl -u $SERVICE -n 50" >&2
+  echo "The site did not answer. Check: sudo tail -n 50 /var/log/nginx/error.log" >&2
   exit 1
 fi

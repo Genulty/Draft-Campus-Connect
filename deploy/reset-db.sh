@@ -3,7 +3,8 @@
 #   sudo bash deploy/reset-db.sh
 set -euo pipefail
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_USER="$(stat -c %U "$APP_DIR")"
-(cd "$APP_DIR" && sudo -u "$APP_USER" env $(grep -v '^#' /etc/campus-connect.env | xargs) node db/load.js)
-systemctl restart campus-connect
-echo "Database reloaded."
+echo "Reloading the database (this takes a few seconds)..."
+mysql < "$APP_DIR/db/Database_schema.sql"
+mysql campus_connect < "$APP_DIR/db/Project_data.sql"
+rm -f /tmp/campus-connect-reset-failures.json
+echo "Database reloaded: $(mysql -N campus_connect -e 'SELECT COUNT(*) FROM User') users."

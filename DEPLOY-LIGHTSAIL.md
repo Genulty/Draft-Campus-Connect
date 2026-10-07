@@ -15,10 +15,13 @@ cd draft-campus-connect
 sudo bash deploy/lightsail-setup.sh
 ```
 
-The script installs Node.js, MySQL and nginx, creates the `campus_connect` database
-and loads all the project data, runs the app as a service that restarts on crashes
-and reboots, and serves it on port 80. When it
-finishes it prints the address, e.g. `http://3.91.12.34`.
+The script installs nginx, PHP (PHP-FPM) and MySQL, creates the `campus_connect` database
+and loads all the project data, and serves the site on port 80: nginx sends the website files
+from `public/` and passes every `/api/...` request to `api/index.php` in PHP-FPM. Everything
+starts again automatically after a reboot. When it finishes it prints the address, e.g. `http://3.91.12.34`.
+
+If the server still runs the older Node.js version, the same script switches it to PHP: it stops and
+removes the old service and keeps the same MySQL password and database.
 
 > **Private repo?** `git clone` will ask for a username and password. Use your
 > GitHub username and a [personal access token](https://github.com/settings/tokens)
@@ -50,12 +53,12 @@ sudo bash deploy/lightsail-setup.sh
 ## Useful commands
 | What | Command |
 |---|---|
-| Live logs | `sudo journalctl -u campus-connect -f` |
-| Restart | `sudo systemctl restart campus-connect` |
-| Status | `sudo systemctl status campus-connect` |
+| Error log | `sudo tail -n 50 /var/log/nginx/error.log` |
+| Restart PHP | `sudo systemctl restart php8.3-fpm` |
+| Restart nginx | `sudo systemctl restart nginx` |
 | Reset the database | `sudo bash deploy/reset-db.sh` |
 | Open MySQL | `sudo mysql campus_connect` |
 | Run the sample queries | `sudo mysql campus_connect < db/sample-queries.sql` |
 | Check the data against the SRS rules | `sudo mysql -t campus_connect < db/validate.sql` |
 
-Settings (port, session secret, MySQL user and password) live in `/etc/campus-connect.env`.
+The MySQL user and password the website uses live in `/etc/campus-connect/config.php` (readable only by root and PHP).

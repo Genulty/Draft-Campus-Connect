@@ -30,10 +30,8 @@ apt-get install -y certbot python3-certbot-nginx
 # Gets the certificate, switches nginx to HTTPS, redirects http:// to https://, and sets up automatic renewal.
 certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email --redirect
 
-# Session cookies only travel over HTTPS from now on.
-ENV_FILE=/etc/campus-connect.env
-grep -q '^COOKIE_SECURE=' "$ENV_FILE" || echo 'COOKIE_SECURE=1' >> "$ENV_FILE"
-systemctl restart campus-connect
+# Rebuild the nginx site with the certificate (PHP marks the session cookie HTTPS-only automatically).
+bash "$(dirname "$0")/lightsail-setup.sh" >/dev/null
 
 echo
 echo "Done. Open: https://$DOMAIN"

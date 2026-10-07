@@ -4,7 +4,7 @@
 //   node db/generate-data.js
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
+const { execFileSync } = require('child_process');
 
 // ---------- helpers ----------
 let seed = 5910;
@@ -29,11 +29,19 @@ function addDays(iso, n) {
   return d.toISOString().slice(0, 10);
 }
 
-// Same password format as server/db.js: "salt:scrypt(password)". Every account uses Campus123!
+// Every account uses Campus123!, stored as a bcrypt hash made by PHP's password_hash(),
+// the same function the website (api/accounts.php) uses. PHP must be installed to run this script.
+// The hashes are made in one batch, the first time they are needed.
 const PASSWORD = 'Campus123!';
+const bcryptHashes = [];
 function hashPassword() {
-  const salt = Array.from({ length: 16 }, () => pad(int(0, 255).toString(16))).join('');
-  return `${salt}:${crypto.scryptSync(PASSWORD, salt, 32).toString('hex')}`;
+  // Draw the same random numbers the old salt did, so the rest of the generated data stays identical.
+  Array.from({ length: 16 }, () => int(0, 255));
+  if (!bcryptHashes.length) {
+    const out = execFileSync('php', ['-r', 'for ($i = 0; $i < 500; $i++) echo password_hash($argv[1], PASSWORD_BCRYPT), "\\n";', '--', PASSWORD]);
+    bcryptHashes.push(...out.toString().trim().split('\n'));
+  }
+  return bcryptHashes.pop();
 }
 
 const tables = {}; // table -> { cols, rows }
