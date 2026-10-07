@@ -120,6 +120,24 @@ APP_BLOCK="    root $APP_DIR/public;
         fastcgi_pass unix:$FPM_SOCKET;
     }"
 
+# phpMyAdmin at /phpmyadmin/, if deploy/enable-phpmyadmin.sh has installed it.
+if [ -d /usr/share/phpmyadmin ]; then
+  APP_BLOCK="$APP_BLOCK
+
+    # phpMyAdmin: a web page for browsing the MySQL database.
+    location = /phpmyadmin { return 301 /phpmyadmin/; }
+    location ^~ /phpmyadmin/ {
+        root /usr/share/;
+        index index.php;
+        try_files \$uri \$uri/ =404;
+        location ~ \\.php\$ {
+            include fastcgi_params;
+            fastcgi_param SCRIPT_FILENAME \$request_filename;
+            fastcgi_pass unix:$FPM_SOCKET;
+        }
+    }"
+fi
+
 # Listen on IPv6 too when the server has it.
 V6_80=""; V6_443=""
 if [ -f /proc/net/if_inet6 ]; then V6_80="listen [::]:80 default_server;"; V6_443="listen [::]:443 ssl;"; fi

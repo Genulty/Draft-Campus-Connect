@@ -43,6 +43,15 @@ Phone browsers often refuse plain `http://` sites. To turn on HTTPS:
 
 The certificate renews automatically. If you attach a static IP later, run the script again (the sslip.io name is built from the IP).
 
+## phpMyAdmin (browse the database in a web page)
+1. In the SSH window: `sudo bash deploy/enable-phpmyadmin.sh`
+2. It prints a username (`dbadmin`) and a random password. Show them again any time with
+   `sudo cat /etc/campus-connect/phpmyadmin-login.txt`.
+3. Open `<your site address>/phpmyadmin/` (for example `http://3.239.161.185/phpmyadmin/`) and log in.
+
+The `dbadmin` login can only see and change the `campus_connect` database. Turn on HTTPS first if you can,
+so the password isn't sent in plain text.
+
 ## Updating after new commits
 ```bash
 cd ~/draft-campus-connect

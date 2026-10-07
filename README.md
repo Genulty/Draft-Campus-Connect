@@ -83,3 +83,4 @@ no registration with an active hold, at most 15 advisees per full-time advisor.
 | `deploy/lightsail-setup.sh` | One-step setup for an Ubuntu server (Lightsail) |
 | `deploy/reset-db.sh` | Reloads the database on the server |
 | `deploy/enable-https.sh` | Turns on HTTPS (free certificate) |
+| `deploy/enable-phpmyadmin.sh` | Installs phpMyAdmin at `/phpmyadmin/` for browsing the database |
