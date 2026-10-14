@@ -150,9 +150,9 @@ function viewHoldsAdvisors(array $u, array $q): array
             'A student with an active hold cannot register.'),
         table('My advisors', "SELECT CONCAT(u.first_Name, ' ', u.last_Name) AS Advisor, f.`rank` AS `Rank`,
             (SELECT GROUP_CONCAT(d.dept_Name SEPARATOR ', ') FROM Faculty_Department fd JOIN Department d ON d.dept_ID = fd.dept_ID WHERE fd.faculty_ID = f.faculty_ID) AS Department,
-            l.user_Email AS Email, CONCAT(o.building_ID, '-', o.room_No) AS Office
+            l.user_Email AS Email, CONCAT(ro.building_ID, '-', ro.room_No) AS Office
           FROM Advisor a JOIN Faculty f ON f.faculty_ID = a.faculty_ID JOIN User u ON u.user_ID = f.faculty_ID
-          JOIN Login l ON l.user_ID = f.faculty_ID LEFT JOIN Office o ON o.office_ID = f.office_ID
+          JOIN Login l ON l.user_ID = f.faculty_ID LEFT JOIN Room ro ON ro.room_ID = f.office_ID
           WHERE a.student_ID = ?", [$u['id']]),
     ]];
 }
@@ -224,8 +224,8 @@ function viewTeaching(array $u, array $q): array
     $f = one("SELECT f.`rank`, f.faculty_Type, f.specialty,
         (SELECT GROUP_CONCAT(CONCAT(d.dept_Name, ' (', fd.percent_Time, '%)') SEPARATOR ', ') FROM Faculty_Department fd
           JOIN Department d ON d.dept_ID = fd.dept_ID WHERE fd.faculty_ID = f.faculty_ID) AS depts,
-        CONCAT(o.building_ID, '-', o.room_No) AS office
-      FROM Faculty f LEFT JOIN Office o ON o.office_ID = f.office_ID WHERE f.faculty_ID = ?", [$u['id']]);
+        CONCAT(ro.building_ID, '-', ro.room_No) AS office
+      FROM Faculty f LEFT JOIN Room ro ON ro.room_ID = f.office_ID WHERE f.faculty_ID = ?", [$u['id']]);
     $cur = currentSemester();
     $next = nextSemester();
     $advisees = one('SELECT COUNT(*) AS n FROM Advisor WHERE faculty_ID = ?', [$u['id']]);
@@ -329,8 +329,16 @@ function viewCreateSection(array $u, array $q): array
           ' ', TIME_FORMAT(p.start_Time, '%l:%i %p'), ' – ', TIME_FORMAT(p.end_Time, '%l:%i %p')) AS label
       FROM Time_Slot ts JOIN Time_Slot_Period tp ON tp.time_Slot_ID = ts.time_Slot_ID JOIN Period p ON p.period_ID = tp.period_ID
       ORDER BY ts.time_Slot_ID");
-    $rooms = rows('SELECT r.room_ID, b.building_Name, r.room_No, r.room_Type, r.capacity FROM Room r
-      JOIN Building b ON b.building_ID = r.building_ID ORDER BY r.room_ID');
+    // Only Lecture and Lab rooms can hold a class (not an Office); capacity comes from whichever
+    // subtype table the room matches (Lecture.seats or Lab.work_Stations).
+    $rooms = rows("SELECT r.room_ID, b.building_Name, r.room_No, r.room_Type,
+        COALESCE(lab.work_Stations, lec.seats) AS capacity
+      FROM Room r
+      JOIN Building b ON b.building_ID = r.building_ID
+      LEFT JOIN Lab lab ON lab.lab_ID = r.room_ID
+      LEFT JOIN Lecture lec ON lec.lecture_ID = r.room_ID
+      WHERE r.room_Type IN ('Lecture', 'Lab')
+      ORDER BY r.room_ID");
     $v = fn (string $name, string $fallback) => isset($q[$name]) ? (string) $q[$name] : $fallback;
     return ['title' => 'Create a course section', 'blocks' => [
         ['type' => 'form', 'title' => "New section for {$sem['semester_Name']}", 'endpoint' => 'create-section', 'submit' => 'Create section', 'fields' => [
