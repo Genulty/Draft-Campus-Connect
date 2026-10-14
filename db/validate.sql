@@ -63,4 +63,25 @@ UNION ALL SELECT 'A-F2 audit entry by a Read-Only admin', COUNT(*)
 UNION ALL SELECT 'Attendance for a student not in the section', COUNT(*)
   FROM Attendance a LEFT JOIN Enrollment e ON e.student_ID = a.student_ID AND e.CRN = a.CRN WHERE e.CRN IS NULL
 UNION ALL SELECT 'Transcript grade differs from enrollment grade', COUNT(*)
-  FROM Student_History h JOIN Enrollment e ON e.student_ID = h.student_ID AND e.CRN = h.CRN WHERE h.grade <> e.grade;
+  FROM Student_History h JOIN Enrollment e ON e.student_ID = h.student_ID AND e.CRN = h.CRN WHERE h.grade <> e.grade
+-- Columns kept up to date by triggers, and the Room / Faculty sub-tables
+UNION ALL SELECT 'Course_Section.available_Seats out of date', COUNT(*)
+  FROM Course_Section cs WHERE cs.available_Seats <> cs.max_Seats - (SELECT COUNT(*) FROM Enrollment e WHERE e.CRN = cs.CRN)
+UNION ALL SELECT 'Copied course_ID differs from the section''s course', (
+    (SELECT COUNT(*) FROM Enrollment x JOIN Course_Section cs ON cs.CRN = x.CRN WHERE x.course_ID <> cs.course_ID)
+  + (SELECT COUNT(*) FROM Attendance x JOIN Course_Section cs ON cs.CRN = x.CRN WHERE x.course_ID <> cs.course_ID)
+  + (SELECT COUNT(*) FROM Student_History x JOIN Course_Section cs ON cs.CRN = x.CRN WHERE x.course_ID <> cs.course_ID)
+  + (SELECT COUNT(*) FROM Faculty_History x JOIN Course_Section cs ON cs.CRN = x.CRN WHERE x.course_ID <> cs.course_ID))
+UNION ALL SELECT 'Login.user_Type differs from User.user_Type', COUNT(*)
+  FROM Login l JOIN User u ON u.user_ID = l.user_ID WHERE l.user_Type <> u.user_Type
+UNION ALL SELECT 'Student.major_ID not among the student''s majors', COUNT(*)
+  FROM Student s WHERE NOT EXISTS (SELECT 1 FROM Student_Major sm WHERE sm.student_ID = s.student_ID AND sm.major_ID = s.major_ID)
+UNION ALL SELECT 'Room without its Lecture/Lab/Office row', COUNT(*)
+  FROM Room r WHERE (r.room_Type = 'Lecture' AND r.room_ID NOT IN (SELECT lecture_ID FROM Lecture))
+     OR (r.room_Type = 'Lab' AND r.room_ID NOT IN (SELECT lab_ID FROM Lab))
+     OR (r.room_Type = 'Office' AND r.room_ID NOT IN (SELECT office_ID FROM Office))
+UNION ALL SELECT 'Course section scheduled in an office', COUNT(*)
+  FROM Course_Section cs JOIN Room r ON r.room_ID = cs.room_ID WHERE r.room_Type = 'Office'
+UNION ALL SELECT 'Faculty without a matching Full_Time/Part_Time row', COUNT(*)
+  FROM Faculty f WHERE NOT EXISTS (SELECT 1 FROM Full_Time_Faculty x WHERE x.faculty_ID = f.faculty_ID AND f.faculty_Type = 'Full-time')
+                   AND NOT EXISTS (SELECT 1 FROM Part_Time_Faculty x WHERE x.faculty_ID = f.faculty_ID AND f.faculty_Type = 'Part-time');
