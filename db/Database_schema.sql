@@ -313,6 +313,9 @@ CREATE TABLE Course_Section (
   room_ID      VARCHAR(10) NOT NULL,
   semester_ID  VARCHAR(10) NOT NULL,
   max_Seats    INT         NOT NULL DEFAULT 10 CHECK (max_Seats BETWEEN 1 AND 10),
+  -- Open seats left in the section. Kept in sync automatically by the triggers below:
+  -- set to max_Seats when the section is created, then adjusted by one on every add/drop (Enrollment row).
+  available_Seats INT      NOT NULL DEFAULT 10 CHECK (available_Seats BETWEEN 0 AND max_Seats),
   UNIQUE (course_ID, section_No, semester_ID),
   UNIQUE (room_ID, time_Slot_ID, semester_ID),     -- no two sections in one room at the same time
   UNIQUE (faculty_ID, time_Slot_ID, semester_ID),  -- no faculty member teaches two sections at the same time
@@ -333,6 +336,26 @@ CREATE TABLE Enrollment (
   FOREIGN KEY (student_ID) REFERENCES Student(student_ID)    ON DELETE CASCADE,
   FOREIGN KEY (CRN)        REFERENCES Course_Section(CRN)    ON DELETE CASCADE
 ) ENGINE=InnoDB;
+
+-- Keeps Course_Section.available_Seats correct without the app having to maintain it:
+-- a new section opens with every seat free, and each Enrollment row taken/removed adjusts it by one.
+DELIMITER $$
+CREATE TRIGGER trg_section_seats_init BEFORE INSERT ON Course_Section
+FOR EACH ROW
+BEGIN
+  SET NEW.available_Seats = NEW.max_Seats;
+END$$
+CREATE TRIGGER trg_enrollment_seat_taken AFTER INSERT ON Enrollment
+FOR EACH ROW
+BEGIN
+  UPDATE Course_Section SET available_Seats = available_Seats - 1 WHERE CRN = NEW.CRN;
+END$$
+CREATE TRIGGER trg_enrollment_seat_freed AFTER DELETE ON Enrollment
+FOR EACH ROW
+BEGIN
+  UPDATE Course_Section SET available_Seats = available_Seats + 1 WHERE CRN = OLD.CRN;
+END$$
+DELIMITER ;
 
 CREATE TABLE Attendance (
   student_ID        INT  NOT NULL,
