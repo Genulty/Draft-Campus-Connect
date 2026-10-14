@@ -97,25 +97,31 @@ function addUser(id, p, type, email) {
     [id, p.first, p.middle, p.last, p.gender, p.dob, p.street, p.city, p.state, p.zip, type]);
   email = email || emailFor(p.first, p.last);
   usedEmails.add(email);
-  insert('Login', ['user_ID','user_Email','user_Password','no_Of_Tries','lock_Var'], [id, email, hashPassword(), 0, 0]);
+  insert('Login', ['user_ID','user_Email','user_Password','user_Type','no_Of_Tries','lock_Var'], [id, email, hashPassword(), type, 0, 0]);
 }
 
 // ---------- buildings, offices, rooms ----------
 const BUILDINGS = [['ACB', 'Academic Building'], ['NSC', 'Natural Sciences'], ['CCT', 'Campus Center'], ['LIB', 'Library Hall'], ['BUS', 'Business Center']];
+const BUILDING_USAGE = { ACB: 'Academic', NSC: 'Academic', CCT: 'Student Services', LIB: 'Library', BUS: 'Academic' };
 const freeOffices = [];
 const rooms = [];
+// Room is the supertype for every space (Lecture, Lab, or Office); the matching subtype row
+// (Lecture/Lab/Office, FK'd to Room.room_ID) is what carries the capacity attribute.
 for (const [b, name] of BUILDINGS) {
-  insert('Building', ['building_ID','building_Name'], [b, name]);
+  insert('Building', ['building_ID','building_Name','building_Usage'], [b, name, BUILDING_USAGE[b]]);
   for (let r = 1; r <= 14; r++) {
     const id = `${b}-${200 + r}`;
     freeOffices.push(id);
-    insert('Office', ['office_ID','building_ID','room_No'], [id, b, String(200 + r)]);
+    insert('Room', ['room_ID','building_ID','room_No','room_Type'], [id, b, String(200 + r), 'Office']);
+    insert('Office', ['office_ID','no_Of_Desks'], [id, pick([1, 2])]);
   }
   for (let r = 1; r <= 6; r++) {
     const lab = r > 4;
     const id = `${b}-${100 + r}`;
     rooms.push(id);
-    insert('Room', ['room_ID','building_ID','room_No','room_Type','capacity'], [id, b, String(100 + r), lab ? 'Lab' : 'Lecture', lab ? pick([20, 24]) : pick([30, 35, 40])]);
+    insert('Room', ['room_ID','building_ID','room_No','room_Type'], [id, b, String(100 + r), lab ? 'Lab' : 'Lecture']);
+    if (lab) insert('Lab', ['lab_ID','work_Stations'], [id, pick([20, 24])]);
+    else insert('Lecture', ['lecture_ID','seats'], [id, pick([30, 35, 40])]);
   }
 }
 const takeOffice = () => freeOffices.splice(int(0, freeOffices.length - 1), 1)[0];
@@ -212,7 +218,8 @@ for (const f of Object.values(faculty)) {
   const others = joint ? joint[1] : [];
   f.depts.push(...others);
   const share = others.length === 0 ? 100 : others.length === 1 ? 75 : 60;
-  insert('Faculty_Department', ['faculty_ID','dept_ID','percent_Time','date_Of_Appointment'], [f.id, f.dept, share, date(int(2005, 2022), pick([1, 8]), 15)]);
+  f.appointmentDate = date(int(2005, 2022), pick([1, 8]), 15);
+  insert('Faculty_Department', ['faculty_ID','dept_ID','percent_Time','date_Of_Appointment'], [f.id, f.dept, share, f.appointmentDate]);
   others.forEach((o, i) => insert('Faculty_Department', ['faculty_ID','dept_ID','percent_Time','date_Of_Appointment'],
     [f.id, o, others.length === 1 ? 25 : 20, date(2023 + i, 8, 15)]));
 }
@@ -224,9 +231,9 @@ for (const d of DEPTS) {
   insert('Major', ['major_ID','dept_ID','major_Name'], [d.major, d.id, `${arts ? 'B.A.' : 'B.S.'} in ${d.name}`]);
   insert('Major', ['major_ID','dept_ID','major_Name'], [d.gradMajor, d.id, d.id === 'BUS' ? 'Master of Business Administration' : `${arts ? 'M.A.' : 'M.S.'} in ${d.name}`]);
   insert('Minor', ['minor_ID','dept_ID','minor_Name'], [d.minor, d.id, `Minor in ${d.name}`]);
-  for (const c of d.ugIds) insert('Major_Course_Requirement', ['major_ID','course_ID'], [d.major, c]);
-  for (const c of d.grIds) insert('Major_Course_Requirement', ['major_ID','course_ID'], [d.gradMajor, c]);
-  for (const c of d.ugIds.slice(0, 6)) insert('Minor_Course_Requirement', ['minor_ID','course_ID'], [d.minor, c]);
+  for (const c of d.ugIds) insert('Major_Course_Requirement', ['major_ID','course_ID','min_Grade_Req'], [d.major, c, 'D']);
+  for (const c of d.grIds) insert('Major_Course_Requirement', ['major_ID','course_ID','min_Grade_Req'], [d.gradMajor, c, 'B']);
+  for (const c of d.ugIds.slice(0, 6)) insert('Minor_Course_Requirement', ['minor_ID','course_ID','min_Grade_Req'], [d.minor, c, 'D']);
 }
 
 // ---------- calendar ----------
@@ -255,8 +262,8 @@ const SEMESTERS = [
 ];
 for (const s of SEMESTERS) {
   const addStart = s.addStart || addDays(s.start, -60);
-  insert('Semester', ['semester_ID','semester_Name','start_Date','end_Date','add_Start','add_End','drop_Start','drop_End','grade_Start','grade_End'],
-    [s.id, s.name, s.start, s.end, addStart, addDays(s.start, 7), addStart, addDays(s.start, 21), addDays(s.end, -7), addDays(s.end, 7)]);
+  insert('Semester', ['semester_ID','semester_Name','year','start_Date','end_Date','add_Start','add_End','drop_Start','drop_End','grade_Start','grade_End'],
+    [s.id, s.name, Number(s.start.slice(0, 4)), s.start, s.end, addStart, addDays(s.start, 7), addStart, addDays(s.start, 21), addDays(s.end, -7), addDays(s.end, 7)]);
 }
 const PAST = ['FA24', 'SP25', 'FA25', 'SP26'];
 
@@ -410,6 +417,14 @@ for (const sem of SEMESTERS) {
   }
 }
 
+// Full_Time_Faculty / Part_Time_Faculty: Faculty is itself a supertype, split the same FOREIGN KEY
+// way as Undergraduate_Student/Graduate_Student. no_Of_Classes is this semester's actual count.
+for (const f of Object.values(faculty)) {
+  const classes = running.filter((k) => k.sem === 'FA26' && k.faculty === f.id).length;
+  if (f.type === 'Full-time') insert('Full_Time_Faculty', ['faculty_ID','no_Of_Classes'], [f.id, classes]);
+  else insert('Part_Time_Faculty', ['faculty_ID','no_Of_Classes','date_Of_Appointment'], [f.id, classes, f.appointmentDate]);
+}
+
 for (const k of running) {
   insert('Course_Section', ['CRN','course_ID','section_No','faculty_ID','time_Slot_ID','room_ID','semester_ID','max_Seats'],
     [k.crn, k.course, k.sectionNo, k.faculty, k.slot.id, k.room, k.sem, SECTION_SEATS]);
@@ -438,7 +453,7 @@ for (const k of running.filter((x) => x.sem === 'FA26')) {
 // ---------- student records ----------
 const entryDate = { FA24: '2024-08-15', FA25: '2025-08-15', FA26: '2026-08-15' };
 for (const s of students) {
-  insert('Student', ['student_ID','student_Year','student_Type'], [s.id, s.year, s.grad ? 'Graduate' : 'Undergraduate']);
+  insert('Student', ['student_ID','major_ID','student_Year','student_Type'], [s.id, s.majors[0], s.year, s.grad ? 'Graduate' : 'Undergraduate']);
   s.fails = Object.values(s.history).filter((g) => g === 'F').length;
   if (!s.grad) {
     insert('Undergraduate_Student', ['student_ID','dept_ID','undergraduate_Student_Type'], [s.id, s.dept, s.type]);
@@ -511,7 +526,8 @@ for (const s of students.filter((x) => x.terms[0] === 'FA26').slice(0, 5)) {
 audit.sort((a, b) => a[7].localeCompare(b[7])).forEach((r, i) => { r[0] = i + 1; insert('Audit_Log', AUDIT_COLS, r); });
 
 // ---------- write the SQL file in foreign-key order ----------
-const ORDER = ['User','Login','Building','Office','Room','Faculty','Admin','Stat_Dept_Member','Department','Faculty_Department',
+const ORDER = ['User','Login','Building','Room','Lecture','Lab','Office','Faculty','Full_Time_Faculty','Part_Time_Faculty',
+  'Admin','Stat_Dept_Member','Department','Faculty_Department',
   'Major','Minor','Course','Course_Prerequisite','Major_Course_Requirement','Minor_Course_Requirement',
   'Student','Undergraduate_Student','Full_Time_Undergraduate','Part_Time_Undergraduate','Graduate_Student',
   'Full_Time_Graduate_Student','Part_Time_Graduate_Student','Student_Major','Student_Minor','Advisor','Hold','Student_Hold',
