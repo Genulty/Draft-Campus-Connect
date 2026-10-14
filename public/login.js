@@ -401,7 +401,7 @@ async function loadWelcome() {
 fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then((d) => {
   if (d) return showDashboard(d.user);
   const hash = location.hash.slice(1);
-  const link = document.querySelector(`.w-cta [data-go="${hash}"], .w-top-links [data-go="${hash}"]`);
+  const link = document.querySelector(`.w-cta [data-go="${hash}"]`);
   if (link) link.click();
   else showWelcome();
 });
