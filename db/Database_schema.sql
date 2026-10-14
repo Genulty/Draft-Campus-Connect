@@ -18,6 +18,10 @@ CREATE TABLE User (
   city        VARCHAR(50),
   state       CHAR(2),
   zip_Code    VARCHAR(10),
+  -- Convenience attribute: which sub-table has this user's details. The professor's notes keep this
+  -- column on User alongside the FOREIGN KEY-based subtype tables below (User -> Student/Faculty/
+  -- Admin/Stat_Dept_Member) -- the FK is what expresses the supertype/subtype relationship; this is
+  -- just a quick label, never the only thing distinguishing a subtype.
   user_Type   ENUM('Student','Faculty','Admin','StatDept') NOT NULL
 ) ENGINE=InnoDB;
 
@@ -25,32 +29,47 @@ CREATE TABLE Login (
   user_ID       INT          PRIMARY KEY,
   user_Email    VARCHAR(100) NOT NULL UNIQUE,
   user_Password VARCHAR(255) NOT NULL,
+  user_Type     ENUM('Student','Faculty','Admin','StatDept') NOT NULL,
   no_Of_Tries   INT          NOT NULL DEFAULT 0,
   lock_Var      TINYINT(1)   NOT NULL DEFAULT 0 CHECK (lock_Var IN (0,1)),
   FOREIGN KEY (user_ID) REFERENCES User(user_ID) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE Building (
-  building_ID   VARCHAR(10) PRIMARY KEY,
-  building_Name VARCHAR(50) NOT NULL UNIQUE
+  building_ID    VARCHAR(10) PRIMARY KEY,
+  building_Name  VARCHAR(50) NOT NULL UNIQUE,
+  building_Usage VARCHAR(50)
 ) ENGINE=InnoDB;
 
-CREATE TABLE Office (
-  office_ID   VARCHAR(10) PRIMARY KEY,
-  building_ID VARCHAR(10) NOT NULL,
-  room_No     VARCHAR(10) NOT NULL,
-  UNIQUE (building_ID, room_No),
-  FOREIGN KEY (building_ID) REFERENCES Building(building_ID)
-) ENGINE=InnoDB;
-
+-- A Room is the supertype for every space in a building: it may be a Lecture hall, a Lab, or an
+-- Office. Which one it is, is expressed by the matching row in the Lecture/Lab/Office subtype table
+-- below (FOREIGN KEY on room_ID), not by capacity living here -- capacity is subtype-specific
+-- (seats for a Lecture, work stations for a Lab, desks for an Office), so Room itself carries none.
 CREATE TABLE Room (
   room_ID     VARCHAR(10) PRIMARY KEY,
   building_ID VARCHAR(10) NOT NULL,
   room_No     VARCHAR(10) NOT NULL,
-  room_Type   ENUM('Lecture','Lab') NOT NULL,
-  capacity    INT         NOT NULL CHECK (capacity > 0),
+  room_Type   ENUM('Lecture','Lab','Office') NOT NULL,
   UNIQUE (building_ID, room_No),
   FOREIGN KEY (building_ID) REFERENCES Building(building_ID)
+) ENGINE=InnoDB;
+
+CREATE TABLE Lecture (
+  lecture_ID VARCHAR(10) PRIMARY KEY,
+  seats      INT NOT NULL CHECK (seats > 0),
+  FOREIGN KEY (lecture_ID) REFERENCES Room(room_ID) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE Lab (
+  lab_ID        VARCHAR(10) PRIMARY KEY,
+  work_Stations INT NOT NULL CHECK (work_Stations > 0),
+  FOREIGN KEY (lab_ID) REFERENCES Room(room_ID) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE Office (
+  office_ID   VARCHAR(10) PRIMARY KEY,
+  no_Of_Desks INT NOT NULL CHECK (no_Of_Desks > 0),
+  FOREIGN KEY (office_ID) REFERENCES Room(room_ID) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE Faculty (
@@ -61,6 +80,22 @@ CREATE TABLE Faculty (
   faculty_Type ENUM('Full-time','Part-time') NOT NULL,
   FOREIGN KEY (faculty_ID) REFERENCES User(user_ID) ON DELETE CASCADE,
   FOREIGN KEY (office_ID)  REFERENCES Office(office_ID)
+) ENGINE=InnoDB;
+
+-- Faculty is itself a supertype of Full-time/Part-time, split the same FOREIGN KEY way as
+-- Undergraduate_Student/Graduate_Student below. faculty_Type above stays as the quick label;
+-- these two tables are what expresses the subtype relationship.
+CREATE TABLE Full_Time_Faculty (
+  faculty_ID    INT PRIMARY KEY,
+  no_Of_Classes INT NOT NULL DEFAULT 0,
+  FOREIGN KEY (faculty_ID) REFERENCES Faculty(faculty_ID) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE Part_Time_Faculty (
+  faculty_ID          INT  PRIMARY KEY,
+  no_Of_Classes        INT  NOT NULL DEFAULT 0,
+  date_Of_Appointment DATE NOT NULL,
+  FOREIGN KEY (faculty_ID) REFERENCES Faculty(faculty_ID) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE Admin (
@@ -136,16 +171,18 @@ CREATE TABLE Course_Prerequisite (
 ) ENGINE=InnoDB;
 
 CREATE TABLE Major_Course_Requirement (
-  major_ID  VARCHAR(10) NOT NULL,
-  course_ID VARCHAR(10) NOT NULL,
+  major_ID      VARCHAR(10) NOT NULL,
+  course_ID     VARCHAR(10) NOT NULL,
+  min_Grade_Req VARCHAR(2)  NOT NULL DEFAULT 'D',
   PRIMARY KEY (major_ID, course_ID),
   FOREIGN KEY (major_ID)  REFERENCES Major(major_ID)   ON DELETE CASCADE,
   FOREIGN KEY (course_ID) REFERENCES Course(course_ID) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE Minor_Course_Requirement (
-  minor_ID  VARCHAR(10) NOT NULL,
-  course_ID VARCHAR(10) NOT NULL,
+  minor_ID      VARCHAR(10) NOT NULL,
+  course_ID     VARCHAR(10) NOT NULL,
+  min_Grade_Req VARCHAR(2)  NOT NULL DEFAULT 'D',
   PRIMARY KEY (minor_ID, course_ID),
   FOREIGN KEY (minor_ID)  REFERENCES Minor(minor_ID)   ON DELETE CASCADE,
   FOREIGN KEY (course_ID) REFERENCES Course(course_ID) ON DELETE CASCADE
@@ -155,9 +192,14 @@ CREATE TABLE Minor_Course_Requirement (
 
 CREATE TABLE Student (
   student_ID   INT         PRIMARY KEY,
+  -- Primary/declared major. Student_Major below still tracks every major a student has declared
+  -- (with the date), including a second major; this column is just the student's main one, which
+  -- the professor's notes show as a direct attribute of Student.
+  major_ID     VARCHAR(10) NOT NULL,
   student_Year VARCHAR(20) NOT NULL,
   student_Type ENUM('Undergraduate','Graduate') NOT NULL,
-  FOREIGN KEY (student_ID) REFERENCES User(user_ID) ON DELETE CASCADE
+  FOREIGN KEY (student_ID) REFERENCES User(user_ID) ON DELETE CASCADE,
+  FOREIGN KEY (major_ID)   REFERENCES Major(major_ID)
 ) ENGINE=InnoDB;
 
 CREATE TABLE Undergraduate_Student (
@@ -257,6 +299,7 @@ CREATE TABLE Student_Hold (
 CREATE TABLE Semester (
   semester_ID   VARCHAR(10) PRIMARY KEY,
   semester_Name VARCHAR(30) NOT NULL,
+  year          INT         NOT NULL,
   start_Date    DATE        NOT NULL,
   end_Date      DATE        NOT NULL,
   add_Start     DATE        NOT NULL,
@@ -304,6 +347,11 @@ CREATE TABLE Time_Slot_Period (
 ) ENGINE=InnoDB;
 
 -- A course section with fewer than 5 registered students is cancelled (deleted) before the semester starts.
+-- room_ID references Room generally (a section can meet in any Lecture room or Lab, not only a Lab).
+-- The professor's handwritten notes literally label this column "lab_ID" with
+-- FOREIGN KEY(lab_ID) REFERENCES Lab(lab_ID) -- taken literally that would make lecture-hall
+-- sections impossible to schedule (only Lab rows could ever be referenced), so this was kept as
+-- room_ID -> Room generally. Flagged to confirm with the professor directly.
 CREATE TABLE Course_Section (
   CRN          INT         PRIMARY KEY,
   course_ID    VARCHAR(10) NOT NULL,
@@ -331,62 +379,54 @@ CREATE TABLE Course_Section (
 -- ---------- Registration, grades, attendance ----------
 
 CREATE TABLE Enrollment (
-  student_ID INT        NOT NULL,
-  CRN        INT        NOT NULL,
+  student_ID INT         NOT NULL,
+  CRN        INT         NOT NULL,
+  -- Denormalized from Course_Section.course_ID via CRN; kept in sync by a BEFORE INSERT trigger below.
+  course_ID  VARCHAR(10) NOT NULL,
   grade      VARCHAR(2),
   PRIMARY KEY (student_ID, CRN),
   FOREIGN KEY (student_ID) REFERENCES Student(student_ID)    ON DELETE CASCADE,
-  FOREIGN KEY (CRN)        REFERENCES Course_Section(CRN)    ON DELETE CASCADE
+  FOREIGN KEY (CRN)        REFERENCES Course_Section(CRN)    ON DELETE CASCADE,
+  FOREIGN KEY (course_ID)  REFERENCES Course(course_ID)
 ) ENGINE=InnoDB;
 
--- Keeps Course_Section.available_Seats correct without the app having to maintain it:
--- a new section opens with every seat free, and each Enrollment row taken/removed adjusts it by one.
-DELIMITER $$
-CREATE TRIGGER trg_section_seats_init BEFORE INSERT ON Course_Section
-FOR EACH ROW
-BEGIN
-  SET NEW.available_Seats = NEW.max_Seats;
-END$$
-CREATE TRIGGER trg_enrollment_seat_taken AFTER INSERT ON Enrollment
-FOR EACH ROW
-BEGIN
-  UPDATE Course_Section SET available_Seats = available_Seats - 1 WHERE CRN = NEW.CRN;
-END$$
-CREATE TRIGGER trg_enrollment_seat_freed AFTER DELETE ON Enrollment
-FOR EACH ROW
-BEGIN
-  UPDATE Course_Section SET available_Seats = available_Seats + 1 WHERE CRN = OLD.CRN;
-END$$
-DELIMITER ;
-
 CREATE TABLE Attendance (
-  student_ID        INT  NOT NULL,
-  CRN               INT  NOT NULL,
+  student_ID        INT         NOT NULL,
+  CRN               INT         NOT NULL,
+  -- Denormalized from Course_Section.course_ID via CRN; kept in sync by a BEFORE INSERT trigger below.
+  course_ID         VARCHAR(10) NOT NULL,
   attendance_Date   DATE NOT NULL,
   attendance_Status ENUM('Present','Absent') NOT NULL,
   PRIMARY KEY (student_ID, CRN, attendance_Date),
   FOREIGN KEY (student_ID) REFERENCES Student(student_ID)    ON DELETE CASCADE,
-  FOREIGN KEY (CRN)        REFERENCES Course_Section(CRN)    ON DELETE CASCADE
+  FOREIGN KEY (CRN)        REFERENCES Course_Section(CRN)    ON DELETE CASCADE,
+  FOREIGN KEY (course_ID)  REFERENCES Course(course_ID)
 ) ENGINE=InnoDB;
 
 CREATE TABLE Student_History (
   student_ID  INT         NOT NULL,
   CRN         INT         NOT NULL,
+  -- Denormalized from Course_Section.course_ID via CRN; kept in sync by a BEFORE INSERT trigger below.
+  course_ID   VARCHAR(10) NOT NULL,
   semester_ID VARCHAR(10) NOT NULL,
   grade       VARCHAR(2)  NOT NULL,
   PRIMARY KEY (student_ID, CRN),
   FOREIGN KEY (student_ID)  REFERENCES Student(student_ID) ON DELETE CASCADE,
   FOREIGN KEY (CRN)         REFERENCES Course_Section(CRN),
+  FOREIGN KEY (course_ID)   REFERENCES Course(course_ID),
   FOREIGN KEY (semester_ID) REFERENCES Semester(semester_ID)
 ) ENGINE=InnoDB;
 
 CREATE TABLE Faculty_History (
   faculty_ID  INT         NOT NULL,
   CRN         INT         NOT NULL,
+  -- Denormalized from Course_Section.course_ID via CRN; kept in sync by a BEFORE INSERT trigger below.
+  course_ID   VARCHAR(10) NOT NULL,
   semester_ID VARCHAR(10) NOT NULL,
   PRIMARY KEY (faculty_ID, CRN),
   FOREIGN KEY (faculty_ID)  REFERENCES Faculty(faculty_ID) ON DELETE CASCADE,
   FOREIGN KEY (CRN)         REFERENCES Course_Section(CRN),
+  FOREIGN KEY (course_ID)   REFERENCES Course(course_ID),
   FOREIGN KEY (semester_ID) REFERENCES Semester(semester_ID)
 ) ENGINE=InnoDB;
 
@@ -404,3 +444,53 @@ CREATE TABLE Audit_Log (
   FOREIGN KEY (admin_ID) REFERENCES Admin(admin_ID),
   FOREIGN KEY (user_ID)  REFERENCES User(user_ID)
 ) ENGINE=InnoDB;
+
+-- ---------- Triggers ----------
+-- Keeps Course_Section.available_Seats correct without the app having to maintain it, and
+-- keeps the denormalized course_ID columns above in sync with the CRN they were entered with,
+-- all without the application code having to maintain them manually.
+DELIMITER $$
+
+CREATE TRIGGER trg_section_seats_init BEFORE INSERT ON Course_Section
+FOR EACH ROW
+BEGIN
+  SET NEW.available_Seats = NEW.max_Seats;
+END$$
+
+CREATE TRIGGER trg_enrollment_seat_taken AFTER INSERT ON Enrollment
+FOR EACH ROW
+BEGIN
+  UPDATE Course_Section SET available_Seats = available_Seats - 1 WHERE CRN = NEW.CRN;
+END$$
+
+CREATE TRIGGER trg_enrollment_seat_freed AFTER DELETE ON Enrollment
+FOR EACH ROW
+BEGIN
+  UPDATE Course_Section SET available_Seats = available_Seats + 1 WHERE CRN = OLD.CRN;
+END$$
+
+CREATE TRIGGER trg_enrollment_course BEFORE INSERT ON Enrollment
+FOR EACH ROW
+BEGIN
+  SET NEW.course_ID = (SELECT course_ID FROM Course_Section WHERE CRN = NEW.CRN);
+END$$
+
+CREATE TRIGGER trg_attendance_course BEFORE INSERT ON Attendance
+FOR EACH ROW
+BEGIN
+  SET NEW.course_ID = (SELECT course_ID FROM Course_Section WHERE CRN = NEW.CRN);
+END$$
+
+CREATE TRIGGER trg_student_history_course BEFORE INSERT ON Student_History
+FOR EACH ROW
+BEGIN
+  SET NEW.course_ID = (SELECT course_ID FROM Course_Section WHERE CRN = NEW.CRN);
+END$$
+
+CREATE TRIGGER trg_faculty_history_course BEFORE INSERT ON Faculty_History
+FOR EACH ROW
+BEGIN
+  SET NEW.course_ID = (SELECT course_ID FROM Course_Section WHERE CRN = NEW.CRN);
+END$$
+
+DELIMITER ;
