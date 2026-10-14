@@ -41,7 +41,7 @@ const SECTION_JOINS = 'JOIN Course c ON c.course_ID = cs.course_ID
   JOIN Building b ON b.building_ID = r.building_ID
   LEFT JOIN User fu ON fu.user_ID = cs.faculty_ID';
 const INSTRUCTOR = "CONCAT(fu.first_Name, ' ', fu.last_Name) AS Instructor";
-const SEATS = 'cs.max_Seats - (SELECT COUNT(*) FROM Enrollment e2 WHERE e2.CRN = cs.CRN) AS `Open seats`';
+const SEATS = 'cs.available_Seats AS `Open seats`';
 const ORDER_BY_TIME = "ORDER BY FIELD(LEFT(Days, 1),'M','T','W','R','F'), p.start_Time";
 const GPA_POINTS = "CASE h.grade WHEN 'A' THEN 4 WHEN 'A-' THEN 3.7 WHEN 'B+' THEN 3.3 WHEN 'B' THEN 3 WHEN 'B-' THEN 2.7
   WHEN 'C+' THEN 2.3 WHEN 'C' THEN 2 WHEN 'C-' THEN 1.7 WHEN 'D+' THEN 1.3 WHEN 'D' THEN 1 ELSE 0 END";
@@ -386,10 +386,10 @@ function viewEnrollmentCounts(array $u, array $q): array
     return ['title' => 'Enrollment counts', 'subtitle' => 'Number of students per section, without names.', 'blocks' => [
         $filters,
         table('Sections', "SELECT cs.CRN, cs.course_ID AS Course, c.course_Name AS Title, cs.section_No AS Section,
-            COUNT(e.student_ID) AS Registered, cs.max_Seats AS `Max seats`, cs.max_Seats - COUNT(e.student_ID) AS Available
+            COUNT(e.student_ID) AS Registered, cs.max_Seats AS `Max seats`, cs.available_Seats AS Available
           FROM Course_Section cs JOIN Course c ON c.course_ID = cs.course_ID LEFT JOIN Enrollment e ON e.CRN = cs.CRN
           WHERE cs.semester_ID = ? AND (? = '' OR c.dept_ID = ?)
-          GROUP BY cs.CRN, cs.course_ID, c.course_Name, cs.section_No, cs.max_Seats ORDER BY cs.course_ID, cs.section_No",
+          GROUP BY cs.CRN, cs.course_ID, c.course_Name, cs.section_No, cs.max_Seats, cs.available_Seats ORDER BY cs.course_ID, cs.section_No",
             [$semester, $deptId, $deptId]),
     ]];
 }
@@ -411,6 +411,7 @@ function viewCatalog(array $u, array $q): array
 {
     $depts = departments();
     $deptId = in_array($q['dept'] ?? null, array_column($depts, 'dept_ID'), true) ? $q['dept'] : $depts[0]['dept_ID'];
+    $cur = currentSemester();
     return ['title' => 'Course catalog', 'blocks' => [
         ['type' => 'filters', 'filters' => [['name' => 'dept', 'label' => 'Department', 'value' => $deptId,
             'options' => array_map(fn ($d) => [$d['dept_ID'], $d['dept_Name']], $depts)]]],
@@ -418,6 +419,10 @@ function viewCatalog(array $u, array $q): array
             COALESCE((SELECT GROUP_CONCAT(CONCAT(cp.prerequisite_Course_ID, ' (min ', cp.min_Grade_Req, ')') SEPARATOR ', ')
               FROM Course_Prerequisite cp WHERE cp.course_ID = c.course_ID), '—') AS Prerequisites
           FROM Course c WHERE c.dept_ID = ? ORDER BY c.course_ID", [$deptId]),
+        table("{$cur['name']} sections offered", 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . SEATS . '
+          FROM Course_Section cs ' . SECTION_JOINS . "
+          WHERE cs.semester_ID = ? AND c.dept_ID = ? " . ORDER_BY_TIME, [$cur['id'], $deptId],
+            'Who is teaching each section this semester, and when and where it meets.'),
         table('Majors and minors', "SELECT 'Major' AS Type, m.major_Name AS Program,
             (SELECT GROUP_CONCAT(r.course_ID ORDER BY r.course_ID SEPARATOR ', ') FROM Major_Course_Requirement r WHERE r.major_ID = m.major_ID) AS `Required courses`
           FROM Major m WHERE m.dept_ID = ?
