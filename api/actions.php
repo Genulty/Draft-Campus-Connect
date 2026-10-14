@@ -58,8 +58,7 @@ function checkAdd(int $studentId, int $crn, bool $lock): string
     if ($missing) {
         fail('Missing prerequisite ' . implode(', ', array_map(fn ($m) => "{$m['id']} (grade {$m['min']} or better)", $missing)) . '.');
     }
-    $taken = (int) one('SELECT COUNT(*) AS n FROM Enrollment WHERE CRN = ?', [$crn])['n'];
-    if ($taken >= $sec['max_Seats']) fail("$label is full ({$sec['max_Seats']} seats).");
+    if ((int) $sec['available_Seats'] <= 0) fail("$label is full ({$sec['max_Seats']} seats).");
     $credits = (int) one('SELECT COALESCE(SUM(c.course_Credits), 0) AS n FROM Enrollment e
       JOIN Course_Section cs ON cs.CRN = e.CRN JOIN Course c ON c.course_ID = cs.course_ID
       WHERE e.student_ID = ? AND cs.semester_ID = ?', [$studentId, $sec['semester_ID']])['n'];
