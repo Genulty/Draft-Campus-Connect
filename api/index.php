@@ -66,7 +66,10 @@ switch (true) {
     case $method === 'GET' && $path === '/api/me':
         respond(200, ['user' => requireUser($user)]);
 
-    // Student sign-up and password reset (public)
+    // Welcome page, student sign-up and password reset (public)
+    case $method === 'GET' && $path === '/api/welcome':
+        respond(200, welcomeInfo());
+
     case $method === 'GET' && $path === '/api/majors':
         respond(200, ['majors' => undergraduateMajors()]);
 

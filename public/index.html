@@ -10,13 +10,66 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="auth" id="login-page">
+  <!-- Welcome page (shown to visitors who are not signed in) -->
+  <div class="welcome" id="welcome-page">
+    <header class="w-top">
+      <a href="#" class="brand" data-go="welcome"><span class="logo">🎓</span><span>Campus Connect<small>University Portal</small></span></a>
+      <div class="w-top-links">
+        <button type="button" data-go="login">Sign in</button>
+        <button type="button" class="primary" data-go="signup">Create account</button>
+      </div>
+    </header>
+
+    <section class="w-hero">
+      <p class="w-kicker" id="w-semester">Welcome</p>
+      <h1>Welcome to Campus Connect</h1>
+      <p class="lead">Register for classes, check your schedule and transcript, manage teaching and advising, and run campus reports — all in one place.</p>
+      <div class="w-cta">
+        <button type="button" class="primary big" data-go="login">Sign in</button>
+        <button type="button" class="big ghost" data-go="signup">New student? Create an account</button>
+      </div>
+      <p class="w-reg" id="w-registration" hidden></p>
+    </section>
+
+    <section class="w-section">
+      <div class="w-numbers" id="w-numbers"></div>
+    </section>
+
+    <section class="w-section">
+      <h2>Made for everyone on campus</h2>
+      <p class="muted">Each person sees exactly what their role allows.</p>
+      <div class="w-roles">
+        <article class="w-role"><span class="w-icon">🎒</span><h3>Students</h3>
+          <ul><li>Add and drop course sections</li><li>See your weekly schedule</li><li>View your transcript and GPA</li><li>Check holds and your advisor</li></ul></article>
+        <article class="w-role"><span class="w-icon">📚</span><h3>Faculty</h3>
+          <ul><li>See the classes you teach</li><li>View class rosters</li><li>Look up your advisees</li></ul></article>
+        <article class="w-role"><span class="w-icon">🏛️</span><h3>Administrators</h3>
+          <ul><li>Create new course sections</li><li>Browse the master schedule</li><li>Manage holds and audits</li></ul></article>
+        <article class="w-role"><span class="w-icon">📊</span><h3>Statistics Department</h3>
+          <ul><li>Enrollment counts by course</li><li>Campus-wide statistics</li><li>Reports by semester and department</li></ul></article>
+      </div>
+    </section>
+
+    <section class="w-section">
+      <h2>Getting started</h2>
+      <ol class="w-steps">
+        <li><b>Create an account</b><span>New students sign up in a minute and get a student ID and campus email.</span></li>
+        <li><b>Sign in</b><span>Use your campus email or ID with your password.</span></li>
+        <li><b>Build your schedule</b><span>Pick sections that fit — the system checks prerequisites, seats and time clashes for you.</span></li>
+      </ol>
+    </section>
+
+    <footer class="w-foot">CS5910 System Design and Implementation · Julio Larrea, Muiz M. Onifade, Pavel Clarke</footer>
+  </div>
+
+  <div class="auth" id="login-page" hidden>
     <div class="hero">
-      <div class="brand"><span class="logo">🎓</span><span>Campus Connect<small>University Portal</small></span></div>
+      <a href="#" class="brand" data-go="welcome"><span class="logo">🎓</span><span>Campus Connect<small>University Portal</small></span></a>
       <div>
         <h1>One place for registration, teaching and reporting.</h1>
         <p class="lead">Students, faculty, administrators and the Statistics Department each see exactly what their role allows.</p>
       </div>
+      <a href="#" class="back-home" data-go="welcome">← Back to the welcome page</a>
       <div class="foot">CS5910 System Design and Implementation · Julio Larrea, Muiz M. Onifade, Pavel Clarke</div>
     </div>
 

@@ -1,4 +1,5 @@
-// Login page logic.
+// Page logic: welcome page, sign in / sign up / reset, and the dashboard.
+const welcomePage = document.getElementById('welcome-page');
 const loginPage = document.getElementById('login-page');
 const dashboardPage = document.getElementById('dashboard-page');
 const form = document.getElementById('login-form');
@@ -10,6 +11,7 @@ async function showDashboard(user) {
   document.getElementById('me-role').textContent = user.role === 'StatDept' ? 'Stat-Dept' : user.role;
   document.getElementById('me-id').textContent = `ID ${user.id}`;
   document.getElementById('portal-name').textContent = `${user.role === 'StatDept' ? 'Stat-Dept' : user.role} portal`;
+  welcomePage.hidden = true;
   loginPage.hidden = true;
   dashboardPage.hidden = false;
   const { views } = await (await fetch('/api/views')).json();
@@ -191,6 +193,7 @@ document.getElementById('nav').addEventListener('click', (e) => {
 
 function showLogin() {
   dashboardPage.hidden = true;
+  welcomePage.hidden = true;
   loginPage.hidden = false;
   showAuthView('login-view');
   form.reset();
@@ -241,11 +244,8 @@ document.querySelectorAll('[data-email]').forEach((b) => b.addEventListener('cli
 
 document.getElementById('logout').addEventListener('click', async () => {
   await fetch('/api/logout', { method: 'POST' });
-  showLogin();
+  showWelcome();
 });
-
-// Stay signed in after a page refresh
-fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then((d) => { if (d) showDashboard(d.user); });
 
 // ---------- Switching between sign in, sign up and password reset ----------
 const authViews = ['login-view', 'signup-view', 'signup-done', 'reset-view'];
@@ -344,4 +344,64 @@ resetForm.addEventListener('submit', async (e) => {
   } finally {
     button.disabled = false;
   }
+});
+
+// ---------- Welcome page ----------
+function showWelcome() {
+  dashboardPage.hidden = true;
+  loginPage.hidden = true;
+  welcomePage.hidden = false;
+  history.replaceState(null, '', location.pathname);
+  window.scrollTo(0, 0);
+  loadWelcome();
+}
+
+// Buttons and links with data-go open the welcome page, sign in or sign up.
+document.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', (e) => {
+  e.preventDefault();
+  const go = b.dataset.go;
+  if (go === 'welcome') return showWelcome();
+  showLogin();
+  if (go === 'signup') {
+    loadMajors();
+    showAuthView('signup-view');
+  }
+  history.replaceState(null, '', `#${go}`);
+  window.scrollTo(0, 0);
+}));
+
+async function loadWelcome() {
+  try {
+    const res = await fetch('/api/welcome');
+    if (!res.ok) return;
+    const info = await res.json();
+    if (info.current) document.getElementById('w-semester').textContent = `${info.current} semester`;
+    const c = info.counts;
+    const numbers = [['Students', c.students], ['Faculty', c.faculty], ['Courses', c.courses],
+      ['Departments', c.departments], [`Sections this semester`, c.sections]];
+    document.getElementById('w-numbers').replaceChildren(...numbers.map(([label, value]) => {
+      const card = el('div', 'w-number');
+      card.append(el('strong', null, value.toLocaleString()), el('span', null, label));
+      return card;
+    }));
+    const reg = document.getElementById('w-registration');
+    const r = info.registration;
+    if (r && info.next) {
+      reg.textContent = Number(r.is_open)
+        ? `Registration for ${info.next} is open until ${r.closes}`
+        : `Registration for ${info.next} runs ${r.opens} – ${r.closes}`;
+      reg.hidden = false;
+    }
+  } catch {
+    // The welcome page still works without the numbers.
+  }
+}
+
+// On first load: signed in → dashboard; #login / #signup → that form; otherwise the welcome page.
+fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then((d) => {
+  if (d) return showDashboard(d.user);
+  const hash = location.hash.slice(1);
+  const link = document.querySelector(`.w-cta [data-go="${hash}"], .w-top-links [data-go="${hash}"]`);
+  if (link) link.click();
+  else showWelcome();
 });

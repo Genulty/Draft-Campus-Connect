@@ -54,6 +54,23 @@ function studentSchedule(string $title, int $studentId, string $semesterId, ?str
       WHERE e.student_ID = ? AND cs.semester_ID = ? ' . ORDER_BY_TIME, [$studentId, $semesterId], $note);
 }
 
+// Public numbers for the welcome page (no sign-in needed).
+function welcomeInfo(): array
+{
+    $cur = currentSemester();
+    $next = nextSemester();
+    $counts = one("SELECT
+        (SELECT COUNT(*) FROM Student) AS students,
+        (SELECT COUNT(*) FROM Faculty) AS faculty,
+        (SELECT COUNT(*) FROM Course) AS courses,
+        (SELECT COUNT(*) FROM Department) AS departments,
+        (SELECT COUNT(*) FROM Course_Section WHERE semester_ID = ?) AS sections", [$cur['id'] ?? '']);
+    $window = $next ? one("SELECT DATE_FORMAT(add_Start, '%b %e') AS opens, DATE_FORMAT(add_End, '%b %e, %Y') AS closes,
+        CURDATE() BETWEEN add_Start AND add_End AS is_open FROM Semester WHERE semester_ID = ?", [$next['id']]) : null;
+    return ['current' => $cur['name'] ?? null, 'next' => $next['name'] ?? null, 'registration' => $window,
+        'counts' => array_map('intval', $counts)];
+}
+
 function departments(): array
 {
     return rows('SELECT dept_ID, dept_Name FROM Department ORDER BY dept_Name');
