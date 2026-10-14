@@ -1,161 +1,193 @@
 <?php
-// Actions that change the database: a student adds or drops a course section,
-// and an admin creates a course section. Every SRS rule is checked before anything is
-// written; a broken rule throws a RuleError explaining why.
+// Sign-in, student sign-up and password reset.
 declare(strict_types=1);
 
-const GRADE_ORDER = "'F','D','D+','C-','C','C+','B-','B','B+','A-','A'";
-const MAX_CREDITS = ['Full-time' => 16, 'Part-time' => 8];  // S-F7, S-F8
-const TEACH_LOAD = ['Full-time' => 2, 'Part-time' => 1];    // A-F7, A-F8
+const MAX_ATTEMPTS = 5;   // the account locks after 5 failed sign-in attempts
+const RESET_AFTER = 3;    // a password reset is offered after 3 failed sign-in attempts
+const MAX_ADVISEES = 15;  // F-F9
+const NAME_PATTERN = "/^[A-Za-z][A-Za-z' -]{0,49}$/";
 
-// Sections that meet on a shared day in the same period clash.
-const CLASH = "EXISTS (SELECT 1 FROM Time_Slot_Day d1 JOIN Time_Slot_Day d2 ON d2.day_ID = d1.day_ID
-    JOIN Time_Slot_Period p1 ON p1.time_Slot_ID = d1.time_Slot_ID
-    JOIN Time_Slot_Period p2 ON p2.time_Slot_ID = d2.time_Slot_ID AND p2.period_ID = p1.period_ID
-  WHERE d1.time_Slot_ID = cs.time_Slot_ID AND d2.time_Slot_ID = ?)";
-
-// ---------- Student: add a course section (S-R22, UC-24/25) ----------
-// Throws a RuleError naming the broken rule, or returns the section label if the student may add it.
-// $lock locks the section row so two students can't take the last seat at the same time.
-function checkAdd(int $studentId, int $crn, bool $lock): string
+function userInfo(int $id): array
 {
-    $sec = one("SELECT cs.*, c.course_Name, c.course_Credits, c.course_Type, s.semester_Name,
-        CURDATE() BETWEEN s.add_Start AND s.add_End AS add_open, s.add_Start, s.add_End
-      FROM Course_Section cs JOIN Course c ON c.course_ID = cs.course_ID JOIN Semester s ON s.semester_ID = cs.semester_ID
-      WHERE cs.CRN = ?" . ($lock ? ' FOR UPDATE' : ''), [$crn]);
-    if (!$sec) fail('That course section does not exist.');
-    $label = "{$sec['course_ID']} {$sec['course_Name']} (CRN {$sec['CRN']})";
-
-    $stu = one("SELECT s.student_Type, COALESCE(u.undergraduate_Student_Type, g.graduate_Student_Type) AS load_type
-      FROM Student s LEFT JOIN Undergraduate_Student u ON u.student_ID = s.student_ID
-      LEFT JOIN Graduate_Student g ON g.student_ID = s.student_ID WHERE s.student_ID = ?", [$studentId]);
-
-    if (!$sec['add_open']) fail("The add period for {$sec['semester_Name']} is {$sec['add_Start']} to {$sec['add_End']}.");
-    $holds = rows('SELECT h.hold_Type FROM Student_Hold sh JOIN Hold h ON h.hold_ID = sh.hold_ID WHERE sh.student_ID = ?', [$studentId]);
-    if ($holds) {
-        fail('You have an active ' . implode(' and ', array_map(fn ($h) => strtolower($h['hold_Type']), $holds)) . ' hold.');
-    }
-    if ($sec['course_Type'] !== $stu['student_Type']) {
-        fail($stu['student_Type'] === 'Undergraduate'
-            ? 'Undergraduates cannot register for graduate courses.'
-            : 'Graduate students cannot register for undergraduate courses.');
-    }
-    $already = one('SELECT cs.CRN FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN
-      WHERE e.student_ID = ? AND cs.course_ID = ? AND cs.semester_ID = ?', [$studentId, $sec['course_ID'], $sec['semester_ID']]);
-    if ($already) fail("You are already registered for {$sec['course_ID']} this semester (CRN {$already['CRN']}).");
-    $passed = one("SELECT h.grade FROM Student_History h JOIN Course_Section hc ON hc.CRN = h.CRN
-      WHERE h.student_ID = ? AND hc.course_ID = ? AND h.grade <> 'F'", [$studentId, $sec['course_ID']]);
-    if ($passed) fail("You already passed {$sec['course_ID']} (grade {$passed['grade']}).");
-    $inProgress = one('SELECT s.semester_Name FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN
-      JOIN Semester s ON s.semester_ID = cs.semester_ID WHERE e.student_ID = ? AND cs.course_ID = ? AND e.grade IS NULL',
-        [$studentId, $sec['course_ID']]);
-    if ($inProgress) fail("You are already taking {$sec['course_ID']} in {$inProgress['semester_Name']}.");
-    $missing = rows('SELECT cp.prerequisite_Course_ID AS id, cp.min_Grade_Req AS min FROM Course_Prerequisite cp
-      WHERE cp.course_ID = ? AND NOT EXISTS (
-        SELECT 1 FROM Student_History h JOIN Course_Section hc ON hc.CRN = h.CRN
-        WHERE h.student_ID = ? AND hc.course_ID = cp.prerequisite_Course_ID
-          AND FIELD(h.grade, ' . GRADE_ORDER . ') >= FIELD(cp.min_Grade_Req, ' . GRADE_ORDER . '))', [$sec['course_ID'], $studentId]);
-    if ($missing) {
-        fail('Missing prerequisite ' . implode(', ', array_map(fn ($m) => "{$m['id']} (grade {$m['min']} or better)", $missing)) . '.');
-    }
-    if ((int) $sec['available_Seats'] <= 0) fail("$label is full ({$sec['max_Seats']} seats).");
-    $credits = (int) one('SELECT COALESCE(SUM(c.course_Credits), 0) AS n FROM Enrollment e
-      JOIN Course_Section cs ON cs.CRN = e.CRN JOIN Course c ON c.course_ID = cs.course_ID
-      WHERE e.student_ID = ? AND cs.semester_ID = ?', [$studentId, $sec['semester_ID']])['n'];
-    $max = MAX_CREDITS[$stu['load_type']];
-    $after = $credits + (int) $sec['course_Credits'];
-    if ($after > $max) {
-        fail("This would bring you to $after credits; the limit for " . strtolower($stu['load_type']) . " students is $max.");
-    }
-    $clash = one('SELECT cs.course_ID, cs.CRN FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN
-      WHERE e.student_ID = ? AND cs.semester_ID = ? AND ' . CLASH, [$studentId, $sec['semester_ID'], $sec['time_Slot_ID']]);
-    if ($clash) fail("$label meets at the same time as {$clash['course_ID']} (CRN {$clash['CRN']}).");
-    return $label;
+    $u = one('SELECT u.user_ID, u.first_Name, u.last_Name, u.user_Type, l.user_Email
+      FROM User u JOIN Login l ON l.user_ID = u.user_ID WHERE u.user_ID = ?', [$id]);
+    return ['id' => $u['user_ID'], 'name' => "{$u['first_Name']} {$u['last_Name']}", 'role' => $u['user_Type'], 'email' => $u['user_Email']];
 }
 
-// The reason a student can't add a section, or null if they can. Used to sort the Register page.
-function whyCannotAdd(int $studentId, int $crn): ?string
+// Finds a Login row by user ID (all digits) or by campus email.
+function findLogin(string $name, string $extraColumns = ''): ?array
 {
-    try {
-        checkAdd($studentId, $crn, false);
-        return null;
-    } catch (RuleError $e) {
-        return $e->getMessage();
+    $column = ctype_digit($name) ? 'l.user_ID' : 'l.user_Email';
+    return one("SELECT l.*$extraColumns FROM Login l JOIN User u ON u.user_ID = l.user_ID WHERE $column = ?", [$name]);
+}
+
+// ---------- Sign in (UC-1 successful login, UC-2 unsuccessful login) ----------
+// Returns [HTTP status, response body]. On success the user is stored in the session.
+function signIn(array $body): array
+{
+    $name = trim((string) ($body['email'] ?? ''));
+    $password = (string) ($body['password'] ?? '');
+    if ($name === '' || $password === '') return [400, ['error' => 'Enter your email (or ID) and password.']];
+
+    $login = findLogin($name);
+    if (!$login) return [401, ['error' => 'Invalid email or password.']];
+    if ($login['lock_Var']) {
+        return [423, ['error' => 'This account is locked after too many failed attempts. Reset your password to unlock it.', 'canReset' => true]];
     }
+
+    if (!password_verify($password, $login['user_Password'])) {
+        $tries = $login['no_Of_Tries'] + 1;
+        $locked = $tries >= MAX_ATTEMPTS ? 1 : 0;
+        run('UPDATE Login SET no_Of_Tries = ?, lock_Var = ? WHERE user_ID = ?', [$tries, $locked, $login['user_ID']]);
+        return [401, [
+            'error' => $locked
+                ? 'Invalid email or password. The account is now locked.'
+                : 'Invalid email or password. ' . (MAX_ATTEMPTS - $tries) . ' attempt(s) left before the account is locked.',
+            'canReset' => $tries >= RESET_AFTER,
+        ]];
+    }
+
+    run('UPDATE Login SET no_Of_Tries = 0 WHERE user_ID = ?', [$login['user_ID']]);
+    session_regenerate_id(true); // a fresh session ID on every sign-in
+    $_SESSION['user'] = userInfo($login['user_ID']);
+    return [200, ['user' => $_SESSION['user']]];
 }
 
-function addSection(int $studentId, int $crn): array
+function checkPassword(mixed $password, mixed $confirm): void
 {
-    return transaction(function () use ($studentId, $crn) {
-        $label = checkAdd($studentId, $crn, true);
-        run('INSERT INTO Enrollment (student_ID, CRN, grade) VALUES (?, ?, NULL)', [$studentId, $crn]);
-        return ['message' => "Added $label."];
-    });
+    if (!is_string($password) || strlen($password) < 8 || !preg_match('/[A-Za-z]/', $password) || !preg_match('/\d/', $password)) {
+        fail('Password must be at least 8 characters and include a letter and a number.');
+    }
+    if ($password !== $confirm) fail('The two passwords do not match.');
 }
 
-// ---------- Student: drop a course section (S-R23, UC-26/27) ----------
-function dropSection(int $studentId, int $crn): array
+// ---------- Sign up as a new undergraduate student ----------
+function signUp(array $form): array
 {
-    return transaction(function () use ($studentId, $crn) {
-        $row = one('SELECT e.grade, cs.course_ID, s.semester_Name, s.drop_Start, s.drop_End,
-            CURDATE() BETWEEN s.drop_Start AND s.drop_End AS drop_open
-          FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN JOIN Semester s ON s.semester_ID = cs.semester_ID
-          WHERE e.student_ID = ? AND e.CRN = ? FOR UPDATE', [$studentId, $crn]);
-        if (!$row) fail('You are not registered for that section.');
-        if (!$row['drop_open']) fail("The drop period for {$row['semester_Name']} is {$row['drop_Start']} to {$row['drop_End']}.");
-        if ($row['grade'] !== null) fail('A graded section cannot be dropped.');
-        run('DELETE FROM Enrollment WHERE student_ID = ? AND CRN = ?', [$studentId, $crn]);
-        return ['message' => "Dropped {$row['course_ID']} (CRN $crn)."];
-    });
-}
+    $clean = fn ($key) => is_string($form[$key] ?? null) ? trim($form[$key]) : '';
+    $first = $clean('first_Name');
+    $middle = $clean('middle_Name');
+    $last = $clean('last_Name');
+    if (!preg_match(NAME_PATTERN, $first)) fail('Enter your first name (letters only).');
+    if ($middle !== '' && !preg_match(NAME_PATTERN, $middle)) fail('Middle name can only contain letters.');
+    if (!preg_match(NAME_PATTERN, $last)) fail('Enter your last name (letters only).');
+    $gender = $clean('gender');
+    if (!in_array($gender, ['Male', 'Female', 'Other'], true)) fail('Choose a gender.');
+    $dob = $clean('DOB');
+    $born = DateTimeImmutable::createFromFormat('!Y-m-d', $dob);
+    if (!$born || $born->format('Y-m-d') !== $dob) fail('Enter your date of birth.');
+    $age = $born->diff(new DateTimeImmutable('today'))->y;
+    if ($born > new DateTimeImmutable('today') || $age < 14 || $age > 100) fail('Date of birth must make you between 14 and 100 years old.');
+    $street = $clean('street') ?: null;
+    $city = $clean('city') ?: null;
+    $state = strtoupper($clean('state')) ?: null;
+    $zip = $clean('zip_Code') ?: null;
+    if ($state !== null && !preg_match('/^[A-Z]{2}$/', $state)) fail('State must be a 2-letter code, like NY.');
+    if ($zip !== null && !preg_match('/^\d{5}$/', $zip)) fail('ZIP code must be 5 digits.');
+    $type = $clean('type');
+    if (!in_array($type, ['Full-time', 'Part-time'], true)) fail('Choose full-time or part-time.');
+    checkPassword($form['password'] ?? null, $form['confirm'] ?? null);
 
-// ---------- Admin: create a course section (A-R26, UC-13) ----------
-function createSection(int $adminId, array $form): array
-{
-    return transaction(function () use ($adminId, $form) {
-        $admin = one('SELECT security_Level FROM Admin WHERE admin_ID = ?', [$adminId]);
-        if (!$admin || $admin['security_Level'] !== 'Read-Write') fail('Read-Only admins cannot create course sections.');
+    return transaction(function () use ($form, $first, $middle, $last, $gender, $dob, $street, $city, $state, $zip, $type) {
+        $insert = function (string $table, array $values): void {
+            $cols = implode(', ', array_keys($values));
+            $marks = implode(', ', array_fill(0, count($values), '?'));
+            run("INSERT INTO $table ($cols) VALUES ($marks)", array_values($values));
+        };
 
-        $seats = filter_var($form['max_Seats'] ?? null, FILTER_VALIDATE_INT);
-        if ($seats === false || $seats < 1 || $seats > 10) fail('A section holds 1 to 10 students.');
-        $sem = one('SELECT semester_ID, semester_Name, start_Date <= CURDATE() AS started FROM Semester WHERE semester_ID = ?',
-            [(string) ($form['semester_ID'] ?? '')]);
-        if (!$sem) fail('Choose a semester.');
-        if ($sem['started']) fail("{$sem['semester_Name']} has already started; sections can only be added to an upcoming semester.");
-        $course = one('SELECT course_ID, course_Name, dept_ID FROM Course WHERE course_ID = ?', [(string) ($form['course_ID'] ?? '')]);
-        if (!$course) fail('Choose a course.');
-        $fac = one("SELECT f.faculty_ID, f.faculty_Type, CONCAT(u.first_Name, ' ', u.last_Name) AS name
-          FROM Faculty f JOIN User u ON u.user_ID = f.faculty_ID WHERE f.faculty_ID = ?", [(int) ($form['faculty_ID'] ?? 0)]);
-        if (!$fac) fail('Choose a faculty member.');
-        $slot = one('SELECT time_Slot_ID FROM Time_Slot WHERE time_Slot_ID = ?', [(int) ($form['time_Slot_ID'] ?? 0)]);
-        if (!$slot) fail('Choose a time slot.');
-        $room = one('SELECT room_ID, capacity FROM Room WHERE room_ID = ?', [(string) ($form['room_ID'] ?? '')]);
-        if (!$room) fail('Choose a room.');
-        if ($room['capacity'] < $seats) fail("Room {$room['room_ID']} only holds {$room['capacity']}.");
+        $major = one("SELECT m.major_ID, m.major_Name, m.dept_ID FROM Major m
+          WHERE m.major_ID = ? AND m.major_ID IN (SELECT major_ID FROM Major_Course_Requirement r JOIN Course c ON c.course_ID = r.course_ID
+            WHERE c.course_Type = 'Undergraduate')", [(string) ($form['major_ID'] ?? '')]);
+        if (!$major) fail('Choose an undergraduate major.');
 
-        $member = one('SELECT 1 AS ok FROM Faculty_Department WHERE faculty_ID = ? AND dept_ID = ?', [$fac['faculty_ID'], $course['dept_ID']]);
-        if (!$member) fail("{$fac['name']} is not a member of the {$course['dept_ID']} department.");
-        // Lock this faculty member's sections for the semester while checking the teaching load.
-        $teaching = rows('SELECT CRN FROM Course_Section WHERE faculty_ID = ? AND semester_ID = ? FOR UPDATE',
-            [$fac['faculty_ID'], $sem['semester_ID']]);
-        if (count($teaching) >= TEACH_LOAD[$fac['faculty_Type']]) {
-            fail("{$fac['name']} (" . strtolower($fac['faculty_Type']) . ') already teaches ' . count($teaching)
-                . " section(s) in {$sem['semester_Name']}.");
+        // A random, unused 6-digit student ID in the student range (100000–199999).
+        $id = null;
+        for ($i = 0; $i < 50 && $id === null; $i++) {
+            $candidate = random_int(100000, 199999);
+            if (!one('SELECT user_ID FROM User WHERE user_ID = ? FOR UPDATE', [$candidate])) $id = $candidate;
         }
-        $facClash = one('SELECT cs.CRN, cs.course_ID FROM Course_Section cs WHERE cs.faculty_ID = ? AND cs.semester_ID = ? AND ' . CLASH,
-            [$fac['faculty_ID'], $sem['semester_ID'], $slot['time_Slot_ID']]);
-        if ($facClash) fail("{$fac['name']} already teaches {$facClash['course_ID']} (CRN {$facClash['CRN']}) at that time.");
-        $roomClash = one('SELECT cs.CRN, cs.course_ID FROM Course_Section cs WHERE cs.room_ID = ? AND cs.semester_ID = ? AND ' . CLASH . ' FOR UPDATE',
-            [$room['room_ID'], $sem['semester_ID'], $slot['time_Slot_ID']]);
-        if ($roomClash) fail("Room {$room['room_ID']} is already used by {$roomClash['course_ID']} (CRN {$roomClash['CRN']}) at that time.");
+        if ($id === null) fail('Could not pick a student ID. Please try again.');
 
-        $crn = (int) one('SELECT COALESCE(MAX(CRN), 10000) + 1 AS crn FROM Course_Section FOR UPDATE')['crn'];
-        $n = (int) one('SELECT COUNT(*) AS n FROM Course_Section WHERE course_ID = ? AND semester_ID = ?',
-            [$course['course_ID'], $sem['semester_ID']])['n'];
-        $sectionNo = str_pad((string) ($n + 1), 3, '0', STR_PAD_LEFT);
-        run('INSERT INTO Course_Section (CRN, course_ID, section_No, faculty_ID, time_Slot_ID, room_ID, semester_ID, max_Seats)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            [$crn, $course['course_ID'], $sectionNo, $fac['faculty_ID'], $slot['time_Slot_ID'], $room['room_ID'], $sem['semester_ID'], $seats]);
-        return ['message' => "Created {$course['course_ID']} section $sectionNo (CRN $crn) for {$sem['semester_Name']}, taught by {$fac['name']}."];
+        // Campus email from the name: first.last@campus.edu, with a number added if it is taken.
+        $base = preg_replace('/[^a-z.]/', '', strtolower("$first.$last"));
+        $email = "$base@campus.edu";
+        for ($n = 2; one('SELECT 1 FROM Login WHERE user_Email = ? FOR UPDATE', [$email]); $n++) $email = "$base$n@campus.edu";
+
+        $today = date('Y-m-d');
+        $fullTime = $type === 'Full-time';
+        $insert('User', ['user_ID' => $id, 'first_Name' => $first, 'middle_Name' => $middle ?: null, 'last_Name' => $last,
+            'gender' => $gender, 'DOB' => $dob, 'street' => $street, 'city' => $city, 'state' => $state, 'zip_Code' => $zip,
+            'user_Type' => 'Student']);
+        $insert('Login', ['user_ID' => $id, 'user_Email' => $email, 'user_Password' => password_hash((string) $form['password'], PASSWORD_DEFAULT),
+            'user_Type' => 'Student', 'no_Of_Tries' => 0, 'lock_Var' => 0]);
+        $insert('Student', ['student_ID' => $id, 'major_ID' => $major['major_ID'], 'student_Year' => 'Freshman', 'student_Type' => 'Undergraduate']);
+        $insert('Undergraduate_Student', ['student_ID' => $id, 'dept_ID' => $major['dept_ID'], 'undergraduate_Student_Type' => $type]);
+        $insert($fullTime ? 'Full_Time_Undergraduate' : 'Part_Time_Undergraduate', ['student_ID' => $id, 'status' => 'Good Standing',
+            'min_Credits' => $fullTime ? 12 : 1, 'max_Credits' => $fullTime ? 16 : 8, 'credits_Earned' => 0]);
+        $insert('Student_Major', ['student_ID' => $id, 'major_ID' => $major['major_ID'], 'date_Of_Choice' => $today]);
+
+        // Advisor: the full-time faculty member in the major's department with the fewest advisees (F-F9, F-F10).
+        $advisor = one("SELECT f.faculty_ID, CONCAT(u.first_Name, ' ', u.last_Name) AS name,
+            (SELECT COUNT(*) FROM Advisor a WHERE a.faculty_ID = f.faculty_ID) AS n
+          FROM Faculty f JOIN Faculty_Department fd ON fd.faculty_ID = f.faculty_ID JOIN User u ON u.user_ID = f.faculty_ID
+          WHERE fd.dept_ID = ? AND f.faculty_Type = 'Full-time'
+          HAVING n < ? ORDER BY n, f.faculty_ID LIMIT 1 FOR UPDATE", [$major['dept_ID'], MAX_ADVISEES]);
+        if ($advisor) $insert('Advisor', ['faculty_ID' => $advisor['faculty_ID'], 'student_ID' => $id, 'date_Of_Appointment' => $today]);
+
+        return ['id' => $id, 'email' => $email, 'name' => "$first $last", 'major' => $major['major_Name'],
+            'advisor' => $advisor['name'] ?? null];
     });
+}
+
+// ---------- Reset a password after 3 failed sign-in attempts (S-R2, UC-3) ----------
+// Verification: the account's user ID and date of birth must match (S-F2).
+// Failed verifications are counted in a small file so they survive between requests:
+// after 5 wrong answers, resets for that account are blocked for 15 minutes.
+function verifyFailures(callable $update): array
+{
+    $file = sys_get_temp_dir() . '/campus-connect-reset-failures.json';
+    $handle = fopen($file, 'c+');
+    flock($handle, LOCK_EX);
+    $data = json_decode(stream_get_contents($handle) ?: '{}', true) ?: [];
+    $data = array_filter($data, fn ($entry) => $entry['until'] > time()); // forget expired entries
+    $result = $update($data);
+    ftruncate($handle, 0);
+    rewind($handle);
+    fwrite($handle, json_encode($data));
+    flock($handle, LOCK_UN);
+    fclose($handle);
+    return $result ?? [];
+}
+
+function resetPassword(array $form): array
+{
+    $name = trim((string) ($form['login'] ?? ''));
+    $login = $name === '' ? null : findLogin($name, ', u.DOB');
+    if (!$login) fail('No account matches that email or ID.');
+    if ($login['no_Of_Tries'] < RESET_AFTER && !$login['lock_Var']) fail('Password reset is available after ' . RESET_AFTER . ' failed sign-in attempts.');
+
+    $key = (string) $login['user_ID'];
+    $blocked = verifyFailures(fn (array $data) => ['blocked' => ($data[$key]['count'] ?? 0) >= 5])['blocked'];
+    if ($blocked) fail('Too many failed verification attempts. Try again in 15 minutes.');
+    if (trim((string) ($form['user_ID'] ?? '')) !== $key || trim((string) ($form['DOB'] ?? '')) !== $login['DOB']) {
+        verifyFailures(function (array &$data) use ($key) {
+            $data[$key] = ['count' => ($data[$key]['count'] ?? 0) + 1, 'until' => time() + 15 * 60];
+        });
+        fail('The ID and date of birth do not match this account.');
+    }
+    checkPassword($form['password'] ?? null, $form['confirm'] ?? null);
+
+    run('UPDATE Login SET user_Password = ?, no_Of_Tries = 0, lock_Var = 0 WHERE user_ID = ?',
+        [password_hash((string) $form['password'], PASSWORD_DEFAULT), $login['user_ID']]);
+    verifyFailures(function (array &$data) use ($key) { unset($data[$key]); });
+    return ['message' => 'Your password was reset and the account is unlocked. You can sign in now.'];
+}
+
+// Undergraduate majors for the sign-up form.
+function undergraduateMajors(): array
+{
+    return rows("SELECT m.major_ID, m.major_Name FROM Major m
+      WHERE EXISTS (SELECT 1 FROM Major_Course_Requirement r JOIN Course c ON c.course_ID = r.course_ID
+        WHERE r.major_ID = m.major_ID AND c.course_Type = 'Undergraduate')
+      ORDER BY m.major_Name");
 }
