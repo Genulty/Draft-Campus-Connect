@@ -119,8 +119,8 @@ function signUp(array $form): array
             'gender' => $gender, 'DOB' => $dob, 'street' => $street, 'city' => $city, 'state' => $state, 'zip_Code' => $zip,
             'user_Type' => 'Student']);
         $insert('Login', ['user_ID' => $id, 'user_Email' => $email, 'user_Password' => password_hash((string) $form['password'], PASSWORD_DEFAULT),
-            'no_Of_Tries' => 0, 'lock_Var' => 0]);
-        $insert('Student', ['student_ID' => $id, 'student_Year' => 'Freshman', 'student_Type' => 'Undergraduate']);
+            'user_Type' => 'Student', 'no_Of_Tries' => 0, 'lock_Var' => 0]);
+        $insert('Student', ['student_ID' => $id, 'major_ID' => $major['major_ID'], 'student_Year' => 'Freshman', 'student_Type' => 'Undergraduate']);
         $insert('Undergraduate_Student', ['student_ID' => $id, 'dept_ID' => $major['dept_ID'], 'undergraduate_Student_Type' => $type]);
         $insert($fullTime ? 'Full_Time_Undergraduate' : 'Part_Time_Undergraduate', ['student_ID' => $id, 'status' => 'Good Standing',
             'min_Credits' => $fullTime ? 12 : 1, 'max_Credits' => $fullTime ? 16 : 8, 'credits_Earned' => 0]);
