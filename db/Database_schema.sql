@@ -315,10 +315,12 @@ CREATE TABLE Course_Section (
   max_Seats    INT         NOT NULL DEFAULT 10 CHECK (max_Seats BETWEEN 1 AND 10),
   -- Open seats left in the section. Kept in sync automatically by the triggers below:
   -- set to max_Seats when the section is created, then adjusted by one on every add/drop (Enrollment row).
-  available_Seats INT      NOT NULL DEFAULT 10 CHECK (available_Seats BETWEEN 0 AND max_Seats),
+  available_Seats INT      NOT NULL DEFAULT 10,
   UNIQUE (course_ID, section_No, semester_ID),
   UNIQUE (room_ID, time_Slot_ID, semester_ID),     -- no two sections in one room at the same time
   UNIQUE (faculty_ID, time_Slot_ID, semester_ID),  -- no faculty member teaches two sections at the same time
+  -- A CHECK comparing two columns must be a table-level constraint, not attached to one column.
+  CHECK (available_Seats BETWEEN 0 AND max_Seats),
   FOREIGN KEY (course_ID)    REFERENCES Course(course_ID),
   FOREIGN KEY (faculty_ID)   REFERENCES Faculty(faculty_ID),
   FOREIGN KEY (time_Slot_ID) REFERENCES Time_Slot(time_Slot_ID),
