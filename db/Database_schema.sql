@@ -23,7 +23,7 @@ CREATE TABLE User (
   -- Admin/Stat_Dept_Member) -- the FK is what expresses the supertype/subtype relationship; this is
   -- just a quick label, never the only thing distinguishing a subtype.
   user_Type   ENUM('Student','Faculty','Admin','StatDept') NOT NULL
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Login (
   user_ID       INT          PRIMARY KEY,
@@ -33,13 +33,13 @@ CREATE TABLE Login (
   no_Of_Tries   INT          NOT NULL DEFAULT 0,
   lock_Var      TINYINT(1)   NOT NULL DEFAULT 0 CHECK (lock_Var IN (0,1)),
   FOREIGN KEY (user_ID) REFERENCES User(user_ID) ON DELETE CASCADE
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Building (
   building_ID    VARCHAR(10) PRIMARY KEY,
   building_Name  VARCHAR(50) NOT NULL UNIQUE,
   building_Usage VARCHAR(50)
-) ENGINE=InnoDB;
+);
 
 -- A Room is the supertype for every space in a building: it may be a Lecture hall, a Lab, or an
 -- Office. Which one it is, is expressed by the matching row in the Lecture/Lab/Office subtype table
@@ -52,25 +52,25 @@ CREATE TABLE Room (
   room_Type   ENUM('Lecture','Lab','Office') NOT NULL,
   UNIQUE (building_ID, room_No),
   FOREIGN KEY (building_ID) REFERENCES Building(building_ID)
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Lecture (
   lecture_ID VARCHAR(10) PRIMARY KEY,
   seats      INT NOT NULL CHECK (seats > 0),
   FOREIGN KEY (lecture_ID) REFERENCES Room(room_ID) ON DELETE CASCADE
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Lab (
   lab_ID        VARCHAR(10) PRIMARY KEY,
   work_Stations INT NOT NULL CHECK (work_Stations > 0),
   FOREIGN KEY (lab_ID) REFERENCES Room(room_ID) ON DELETE CASCADE
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Office (
   office_ID   VARCHAR(10) PRIMARY KEY,
   no_Of_Desks INT NOT NULL CHECK (no_Of_Desks > 0),
   FOREIGN KEY (office_ID) REFERENCES Room(room_ID) ON DELETE CASCADE
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Faculty (
   faculty_ID   INT          PRIMARY KEY,
@@ -80,7 +80,7 @@ CREATE TABLE Faculty (
   faculty_Type ENUM('Full-time','Part-time') NOT NULL,
   FOREIGN KEY (faculty_ID) REFERENCES User(user_ID) ON DELETE CASCADE,
   FOREIGN KEY (office_ID)  REFERENCES Office(office_ID)
-) ENGINE=InnoDB;
+);
 
 -- Faculty is itself a supertype of Full-time/Part-time, split the same FOREIGN KEY way as
 -- Undergraduate_Student/Graduate_Student below. faculty_Type above stays as the quick label;
@@ -89,26 +89,26 @@ CREATE TABLE Full_Time_Faculty (
   faculty_ID    INT PRIMARY KEY,
   no_Of_Classes INT NOT NULL DEFAULT 0,
   FOREIGN KEY (faculty_ID) REFERENCES Faculty(faculty_ID) ON DELETE CASCADE
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Part_Time_Faculty (
   faculty_ID          INT  PRIMARY KEY,
   no_Of_Classes        INT  NOT NULL DEFAULT 0,
   date_Of_Appointment DATE NOT NULL,
   FOREIGN KEY (faculty_ID) REFERENCES Faculty(faculty_ID) ON DELETE CASCADE
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Admin (
   admin_ID       INT PRIMARY KEY,
   security_Level ENUM('Read-Only','Read-Write') NOT NULL,
   FOREIGN KEY (admin_ID) REFERENCES User(user_ID) ON DELETE CASCADE
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Stat_Dept_Member (
   stat_dept_ID INT         PRIMARY KEY,
   access_Level VARCHAR(30) NOT NULL DEFAULT 'Aggregate',
   FOREIGN KEY (stat_dept_ID) REFERENCES User(user_ID) ON DELETE CASCADE
-) ENGINE=InnoDB;
+);
 
 -- ---------- Departments, majors, minors, courses ----------
 
@@ -122,7 +122,7 @@ CREATE TABLE Department (
   dept_Manager VARCHAR(100),
   FOREIGN KEY (chair_ID)  REFERENCES Faculty(faculty_ID) ON DELETE SET NULL,
   FOREIGN KEY (office_ID) REFERENCES Office(office_ID)
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Faculty_Department (
   faculty_ID          INT         NOT NULL,
@@ -132,21 +132,21 @@ CREATE TABLE Faculty_Department (
   PRIMARY KEY (faculty_ID, dept_ID),
   FOREIGN KEY (faculty_ID) REFERENCES Faculty(faculty_ID) ON DELETE CASCADE,
   FOREIGN KEY (dept_ID)    REFERENCES Department(dept_ID) ON DELETE CASCADE
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Major (
   major_ID   VARCHAR(10)  PRIMARY KEY,
   dept_ID    VARCHAR(10)  NOT NULL,
   major_Name VARCHAR(100) NOT NULL UNIQUE,
   FOREIGN KEY (dept_ID) REFERENCES Department(dept_ID)
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Minor (
   minor_ID   VARCHAR(10)  PRIMARY KEY,
   dept_ID    VARCHAR(10)  NOT NULL,
   minor_Name VARCHAR(100) NOT NULL UNIQUE,
   FOREIGN KEY (dept_ID) REFERENCES Department(dept_ID)
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Course (
   course_ID      VARCHAR(10)  PRIMARY KEY,
@@ -156,7 +156,7 @@ CREATE TABLE Course (
   course_Desc    VARCHAR(500),
   course_Type    ENUM('Undergraduate','Graduate') NOT NULL,
   FOREIGN KEY (dept_ID) REFERENCES Department(dept_ID)
-) ENGINE=InnoDB;
+);
 
 -- MySQL does not allow a CHECK on columns whose foreign keys cascade,
 -- so these two foreign keys use the default (RESTRICT).
@@ -168,7 +168,7 @@ CREATE TABLE Course_Prerequisite (
   CHECK (course_ID <> prerequisite_Course_ID),
   FOREIGN KEY (course_ID)              REFERENCES Course(course_ID),
   FOREIGN KEY (prerequisite_Course_ID) REFERENCES Course(course_ID)
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Major_Course_Requirement (
   major_ID      VARCHAR(10) NOT NULL,
@@ -177,7 +177,7 @@ CREATE TABLE Major_Course_Requirement (
   PRIMARY KEY (major_ID, course_ID),
   FOREIGN KEY (major_ID)  REFERENCES Major(major_ID)   ON DELETE CASCADE,
   FOREIGN KEY (course_ID) REFERENCES Course(course_ID) ON DELETE CASCADE
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Minor_Course_Requirement (
   minor_ID      VARCHAR(10) NOT NULL,
@@ -186,7 +186,7 @@ CREATE TABLE Minor_Course_Requirement (
   PRIMARY KEY (minor_ID, course_ID),
   FOREIGN KEY (minor_ID)  REFERENCES Minor(minor_ID)   ON DELETE CASCADE,
   FOREIGN KEY (course_ID) REFERENCES Course(course_ID) ON DELETE CASCADE
-) ENGINE=InnoDB;
+);
 
 -- ---------- Students ----------
 
@@ -200,7 +200,7 @@ CREATE TABLE Student (
   student_Type ENUM('Undergraduate','Graduate') NOT NULL,
   FOREIGN KEY (student_ID) REFERENCES User(user_ID) ON DELETE CASCADE,
   FOREIGN KEY (major_ID)   REFERENCES Major(major_ID)
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Undergraduate_Student (
   student_ID                 INT         PRIMARY KEY,
@@ -208,7 +208,7 @@ CREATE TABLE Undergraduate_Student (
   undergraduate_Student_Type ENUM('Full-time','Part-time') NOT NULL,
   FOREIGN KEY (student_ID) REFERENCES Student(student_ID) ON DELETE CASCADE,
   FOREIGN KEY (dept_ID)    REFERENCES Department(dept_ID)
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Full_Time_Undergraduate (
   student_ID     INT         PRIMARY KEY,
@@ -217,7 +217,7 @@ CREATE TABLE Full_Time_Undergraduate (
   max_Credits    INT         NOT NULL DEFAULT 16,
   credits_Earned INT         NOT NULL DEFAULT 0,
   FOREIGN KEY (student_ID) REFERENCES Undergraduate_Student(student_ID) ON DELETE CASCADE
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Part_Time_Undergraduate (
   student_ID     INT         PRIMARY KEY,
@@ -226,7 +226,7 @@ CREATE TABLE Part_Time_Undergraduate (
   max_Credits    INT         NOT NULL DEFAULT 8,
   credits_Earned INT         NOT NULL DEFAULT 0,
   FOREIGN KEY (student_ID) REFERENCES Undergraduate_Student(student_ID) ON DELETE CASCADE
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Graduate_Student (
   student_ID            INT         PRIMARY KEY,
@@ -235,7 +235,7 @@ CREATE TABLE Graduate_Student (
   graduate_Student_Type ENUM('Full-time','Part-time') NOT NULL,
   FOREIGN KEY (student_ID) REFERENCES Student(student_ID) ON DELETE CASCADE,
   FOREIGN KEY (dept_ID)    REFERENCES Department(dept_ID)
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Full_Time_Graduate_Student (
   student_ID     INT         PRIMARY KEY,
@@ -243,7 +243,7 @@ CREATE TABLE Full_Time_Graduate_Student (
   credits_Earned INT         NOT NULL DEFAULT 0,
   thesis_Type    ENUM('Thesis','Non-Thesis','Dissertation') NOT NULL DEFAULT 'Non-Thesis',
   FOREIGN KEY (student_ID) REFERENCES Graduate_Student(student_ID) ON DELETE CASCADE
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Part_Time_Graduate_Student (
   student_ID     INT         PRIMARY KEY,
@@ -251,7 +251,7 @@ CREATE TABLE Part_Time_Graduate_Student (
   credits_Earned INT         NOT NULL DEFAULT 0,
   thesis_Type    ENUM('Thesis','Non-Thesis','Dissertation') NOT NULL DEFAULT 'Non-Thesis',
   FOREIGN KEY (student_ID) REFERENCES Graduate_Student(student_ID) ON DELETE CASCADE
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Student_Major (
   student_ID     INT         NOT NULL,
@@ -260,7 +260,7 @@ CREATE TABLE Student_Major (
   PRIMARY KEY (student_ID, major_ID),
   FOREIGN KEY (student_ID) REFERENCES Student(student_ID) ON DELETE CASCADE,
   FOREIGN KEY (major_ID)   REFERENCES Major(major_ID)
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Student_Minor (
   student_ID     INT         NOT NULL,
@@ -269,7 +269,7 @@ CREATE TABLE Student_Minor (
   PRIMARY KEY (student_ID, minor_ID),
   FOREIGN KEY (student_ID) REFERENCES Student(student_ID) ON DELETE CASCADE,
   FOREIGN KEY (minor_ID)   REFERENCES Minor(minor_ID)
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Advisor (
   faculty_ID          INT  NOT NULL,
@@ -278,12 +278,12 @@ CREATE TABLE Advisor (
   PRIMARY KEY (faculty_ID, student_ID),
   FOREIGN KEY (faculty_ID) REFERENCES Faculty(faculty_ID) ON DELETE CASCADE,
   FOREIGN KEY (student_ID) REFERENCES Student(student_ID) ON DELETE CASCADE
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Hold (
   hold_ID   INT PRIMARY KEY,
   hold_Type ENUM('Academic','Financial','Health','Disciplinary') NOT NULL UNIQUE
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Student_Hold (
   student_ID INT  NOT NULL,
@@ -292,7 +292,7 @@ CREATE TABLE Student_Hold (
   PRIMARY KEY (student_ID, hold_ID),
   FOREIGN KEY (student_ID) REFERENCES Student(student_ID) ON DELETE CASCADE,
   FOREIGN KEY (hold_ID)    REFERENCES Hold(hold_ID)
-) ENGINE=InnoDB;
+);
 
 -- ---------- Calendar and scheduling ----------
 
@@ -312,23 +312,23 @@ CREATE TABLE Semester (
   CHECK (add_Start <= add_End),
   CHECK (drop_Start <= drop_End),
   CHECK (grade_Start <= grade_End)
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Day (
   day_ID   CHAR(1)     PRIMARY KEY,
   week_Day VARCHAR(10) NOT NULL UNIQUE
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Period (
   period_ID  INT  PRIMARY KEY,
   start_Time TIME NOT NULL,
   end_Time   TIME NOT NULL,
   CHECK (start_Time < end_Time)
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Time_Slot (
   time_Slot_ID INT PRIMARY KEY
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Time_Slot_Day (
   time_Slot_ID INT     NOT NULL,
@@ -336,7 +336,7 @@ CREATE TABLE Time_Slot_Day (
   PRIMARY KEY (time_Slot_ID, day_ID),
   FOREIGN KEY (time_Slot_ID) REFERENCES Time_Slot(time_Slot_ID) ON DELETE CASCADE,
   FOREIGN KEY (day_ID)       REFERENCES Day(day_ID)
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Time_Slot_Period (
   time_Slot_ID INT NOT NULL,
@@ -344,7 +344,7 @@ CREATE TABLE Time_Slot_Period (
   PRIMARY KEY (time_Slot_ID, period_ID),
   FOREIGN KEY (time_Slot_ID) REFERENCES Time_Slot(time_Slot_ID) ON DELETE CASCADE,
   FOREIGN KEY (period_ID)    REFERENCES Period(period_ID)
-) ENGINE=InnoDB;
+);
 
 -- A course section with fewer than 5 registered students is cancelled (deleted) before the semester starts.
 -- room_ID references Room generally (a section can meet in any Lecture room or Lab, not only a Lab).
@@ -374,7 +374,7 @@ CREATE TABLE Course_Section (
   FOREIGN KEY (time_Slot_ID) REFERENCES Time_Slot(time_Slot_ID),
   FOREIGN KEY (room_ID)      REFERENCES Room(room_ID),
   FOREIGN KEY (semester_ID)  REFERENCES Semester(semester_ID)
-) ENGINE=InnoDB;
+);
 
 -- ---------- Registration, grades, attendance ----------
 
@@ -388,7 +388,7 @@ CREATE TABLE Enrollment (
   FOREIGN KEY (student_ID) REFERENCES Student(student_ID)    ON DELETE CASCADE,
   FOREIGN KEY (CRN)        REFERENCES Course_Section(CRN)    ON DELETE CASCADE,
   FOREIGN KEY (course_ID)  REFERENCES Course(course_ID)
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Attendance (
   student_ID        INT         NOT NULL,
@@ -401,7 +401,7 @@ CREATE TABLE Attendance (
   FOREIGN KEY (student_ID) REFERENCES Student(student_ID)    ON DELETE CASCADE,
   FOREIGN KEY (CRN)        REFERENCES Course_Section(CRN)    ON DELETE CASCADE,
   FOREIGN KEY (course_ID)  REFERENCES Course(course_ID)
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Student_History (
   student_ID  INT         NOT NULL,
@@ -415,7 +415,7 @@ CREATE TABLE Student_History (
   FOREIGN KEY (CRN)         REFERENCES Course_Section(CRN),
   FOREIGN KEY (course_ID)   REFERENCES Course(course_ID),
   FOREIGN KEY (semester_ID) REFERENCES Semester(semester_ID)
-) ENGINE=InnoDB;
+);
 
 CREATE TABLE Faculty_History (
   faculty_ID  INT         NOT NULL,
@@ -428,7 +428,7 @@ CREATE TABLE Faculty_History (
   FOREIGN KEY (CRN)         REFERENCES Course_Section(CRN),
   FOREIGN KEY (course_ID)   REFERENCES Course(course_ID),
   FOREIGN KEY (semester_ID) REFERENCES Semester(semester_ID)
-) ENGINE=InnoDB;
+);
 
 -- ---------- Admin audit log (A-R43, A-R44) ----------
 
@@ -443,7 +443,7 @@ CREATE TABLE Audit_Log (
   date_Time   DATETIME     NOT NULL,
   FOREIGN KEY (admin_ID) REFERENCES Admin(admin_ID),
   FOREIGN KEY (user_ID)  REFERENCES User(user_ID)
-) ENGINE=InnoDB;
+);
 
 -- ---------- Triggers ----------
 -- Keeps Course_Section.available_Seats correct without the app having to maintain it, and
