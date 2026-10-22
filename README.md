@@ -3,7 +3,8 @@
 CS5910 System Design and Implementation — Julio Larrea, Muiz M. Onifade, Pavel Clarke.
 
 Contains the MySQL database schema, generated project data for every table, a working login screen, dashboard pages for
-each role, student sign-up and password reset, student registration (add/drop) and admin course-section creation. See [DEMO.md](DEMO.md) for the midterm demo.
+each role, every student use case (registration, grades, degree audit, majors and minors, address and password),
+admin user creation and course-section creation, and password reset. See [DEMO.md](DEMO.md) for the midterm demo.
 
 ## How it is built
 
@@ -78,7 +79,8 @@ no registration with an active hold, at most 15 advisees per full-time advisor.
 | `api/index.php` | The API: every `/api/...` request (routes, sign-in, sessions) |
 | `api/db.php` | MySQL connection (PDO) and query helpers |
 | `api/views.php` | Dashboard pages for each role (the SQL behind each page) |
-| `api/accounts.php` | Sign-in, student sign-up and password reset |
+| `api/accounts.php` | Sign-in, password reset, and creating users (admins only) |
+| `api/student.php` | A user's address and password, and a student's majors, minors and advisors |
 | `api/actions.php` | Add/drop a section and create a section, with the SRS rule checks |
 | `public/` | Login page and dashboard |
 | `deploy/lightsail-setup.sh` | One-step setup for an Ubuntu server (Lightsail) |

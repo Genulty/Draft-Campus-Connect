@@ -15,6 +15,7 @@ if (PHP_SAPI === 'cli-server' && !str_starts_with($path, '/api/')) {
 require __DIR__ . '/db.php';
 require __DIR__ . '/actions.php';
 require __DIR__ . '/accounts.php';
+require __DIR__ . '/student.php';
 require __DIR__ . '/views.php';
 
 function respond(int $status, array $body): never
@@ -66,15 +67,9 @@ switch (true) {
     case $method === 'GET' && $path === '/api/me':
         respond(200, ['user' => requireUser($user)]);
 
-    // Welcome page, student sign-up and password reset (public)
+    // Welcome page and password reset (public). New accounts are created by an admin (create-user below).
     case $method === 'GET' && $path === '/api/welcome':
         respond(200, welcomeInfo());
-
-    case $method === 'GET' && $path === '/api/majors':
-        respond(200, ['majors' => undergraduateMajors()]);
-
-    case $method === 'POST' && $path === '/api/signup':
-        respond(200, signUp($body));
 
     case $method === 'POST' && $path === '/api/reset-password':
         respond(200, resetPassword($body));
@@ -88,15 +83,31 @@ switch (true) {
         if ($page === null) respond(404, ['error' => 'That page is not available for your role.']);
         respond(200, $page);
 
-    // Actions that change the database, each limited to one role
+    // Actions that change the database, each limited to the roles allowed to make them
     case $method === 'POST' && preg_match('#^/api/actions/([a-z-]+)$#', $path, $m) === 1:
         $user = requireUser($user);
-        $allowed = ['add-section' => 'Student', 'drop-section' => 'Student', 'create-section' => 'Admin'];
-        if (($allowed[$m[1]] ?? null) !== $user['role']) respond(403, ['error' => 'Your role cannot do that.']);
+        $everyone = ['Student', 'Faculty', 'Admin', 'StatDept'];
+        $allowed = [
+            'add-section' => ['Student'], 'drop-section' => ['Student'],
+            'add-major' => ['Student'], 'change-major' => ['Student'], 'drop-major' => ['Student'],
+            'add-minor' => ['Student'], 'change-minor' => ['Student'], 'drop-minor' => ['Student'],
+            'update-address' => $everyone, 'change-password' => $everyone,
+            'create-section' => ['Admin'], 'create-user' => ['Admin'],
+        ];
+        if (!in_array($user['role'], $allowed[$m[1]] ?? [], true)) respond(403, ['error' => 'Your role cannot do that.']);
         respond(200, match ($m[1]) {
             'add-section' => addSection($user['id'], (int) ($body['CRN'] ?? 0)),
             'drop-section' => dropSection($user['id'], (int) ($body['CRN'] ?? 0)),
+            'add-major' => addMajor($user['id'], $body),
+            'change-major' => changeMajor($user['id'], $body),
+            'drop-major' => dropMajor($user['id'], $body),
+            'add-minor' => addMinor($user['id'], $body),
+            'change-minor' => changeMinor($user['id'], $body),
+            'drop-minor' => dropMinor($user['id'], $body),
+            'update-address' => updateAddress($user['id'], $body),
+            'change-password' => changePassword($user['id'], $body),
             'create-section' => createSection($user['id'], $body),
+            'create-user' => createUser($user['id'], $body),
         });
 
     default:

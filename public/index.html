@@ -22,7 +22,6 @@
       <p class="lead">Register for classes, check your schedule and transcript, manage teaching and advising, and run campus reports — all in one place.</p>
       <div class="w-cta">
         <button type="button" class="primary big" data-go="login">Sign in</button>
-        <button type="button" class="big ghost" data-go="signup">New student? Create an account</button>
       </div>
       <p class="w-reg" id="w-registration" hidden></p>
     </section>
@@ -36,11 +35,11 @@
       <p class="muted">Each person sees exactly what their role allows.</p>
       <div class="w-roles">
         <article class="w-role"><span class="w-icon">🎒</span><h3>Students</h3>
-          <ul><li>Add and drop course sections</li><li>See your weekly schedule</li><li>View your transcript and GPA</li><li>Check holds and your advisor</li></ul></article>
+          <ul><li>Add and drop course sections</li><li>See your schedule, grades and transcript</li><li>Track your degree audit</li><li>Declare or change majors and minors</li><li>Check holds and your advisors</li></ul></article>
         <article class="w-role"><span class="w-icon">📚</span><h3>Faculty</h3>
           <ul><li>See the classes you teach</li><li>View class rosters</li><li>Look up your advisees</li></ul></article>
         <article class="w-role"><span class="w-icon">🏛️</span><h3>Administrators</h3>
-          <ul><li>Create new course sections</li><li>Browse the master schedule</li><li>Manage holds and audits</li></ul></article>
+          <ul><li>Create user accounts</li><li>Create new course sections</li><li>Browse the master schedule</li><li>Manage holds and audits</li></ul></article>
         <article class="w-role"><span class="w-icon">📊</span><h3>Statistics Department</h3>
           <ul><li>Enrollment counts by course</li><li>Campus-wide statistics</li><li>Reports by semester and department</li></ul></article>
       </div>
@@ -49,7 +48,7 @@
     <section class="w-section">
       <h2>Getting started</h2>
       <ol class="w-steps">
-        <li><b>Create an account</b><span>New students sign up in a minute and get a student ID and campus email.</span></li>
+        <li><b>Get your account</b><span>The registrar's office creates your account and gives you your ID and campus email.</span></li>
         <li><b>Sign in</b><span>Use your campus email or ID with your password.</span></li>
         <li><b>Build your schedule</b><span>Pick sections that fit — the system checks prerequisites, seats and time clashes for you.</span></li>
       </ol>
@@ -80,7 +79,7 @@
           <button type="submit" class="primary">Sign in</button>
         </form>
         <p class="muted small">Accounts lock after 5 failed attempts. After 3, you can reset your password.</p>
-        <p class="small">New student? <a href="#" data-show="signup-view">Create an account</a></p>
+        <p class="muted small">New to campus? Your account is created by the registrar's office.</p>
         <div class="demo small">
           <b>Test accounts</b> <span class="muted">— password <code>Campus123!</code></span>
           <div class="chips">
@@ -90,48 +89,6 @@
             <button type="button" data-email="stat@campus.edu">Stat-Dept</button>
           </div>
         </div>
-      </div>
-
-      <!-- Student sign-up -->
-      <div class="card wide" id="signup-view" hidden>
-        <div><h2>Create a student account</h2><p class="muted">You will get a student ID and a campus email to sign in with.</p></div>
-        <div id="signup-message"></div>
-        <form id="signup-form">
-          <div class="row3">
-            <label>First name<input name="first_Name" required maxlength="50" autocomplete="given-name"></label>
-            <label><span>Middle name <span class="opt">optional</span></span><input name="middle_Name" maxlength="50" autocomplete="additional-name"></label>
-            <label>Last name<input name="last_Name" required maxlength="50" autocomplete="family-name"></label>
-          </div>
-          <div class="row3">
-            <label>Gender<select name="gender" required><option value="">Choose…</option><option>Female</option><option>Male</option><option>Other</option></select></label>
-            <label>Date of birth<input name="DOB" type="date" required></label>
-            <label>Status<select name="type"><option>Full-time</option><option>Part-time</option></select></label>
-          </div>
-          <label>Major<select name="major_ID" id="major-select" required><option value="">Choose…</option></select></label>
-          <fieldset>
-            <legend>Address <span class="opt">optional</span></legend>
-            <label>Street<input name="street" maxlength="100" autocomplete="street-address"></label>
-            <div class="row3">
-              <label>City<input name="city" maxlength="50" autocomplete="address-level2"></label>
-              <label>State<input name="state" maxlength="2" placeholder="NY" autocomplete="address-level1"></label>
-              <label>ZIP<input name="zip_Code" maxlength="5" inputmode="numeric" autocomplete="postal-code"></label>
-            </div>
-          </fieldset>
-          <div class="row2">
-            <label>Password<input name="password" type="password" required minlength="8" autocomplete="new-password"></label>
-            <label>Confirm password<input name="confirm" type="password" required minlength="8" autocomplete="new-password"></label>
-          </div>
-          <p class="muted small">At least 8 characters, with a letter and a number.</p>
-          <button type="submit" class="primary">Create account</button>
-        </form>
-        <p class="small"><a href="#" data-show="login-view">Back to sign in</a></p>
-      </div>
-
-      <!-- Sign-up result -->
-      <div class="card wide" id="signup-done" hidden>
-        <div><h2>Account created</h2><p class="muted">Write these down. You can sign in with either one.</p></div>
-        <div class="stats" id="signup-facts"></div>
-        <button type="button" class="primary" id="signup-signin">Sign in now</button>
       </div>
 
       <!-- Password reset -->

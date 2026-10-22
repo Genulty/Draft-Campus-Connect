@@ -234,6 +234,130 @@ function viewRegister(array $u, array $q): array
     ]];
 }
 
+// Semester grades (S-R7): one semester at a time, with that semester's GPA.
+function viewGrades(array $u, array $q): array
+{
+    $sems = rows('SELECT DISTINCT sem.semester_ID, sem.semester_Name, sem.start_Date FROM Semester sem
+      WHERE sem.semester_ID IN (SELECT h.semester_ID FROM Student_History h WHERE h.student_ID = ?)
+         OR sem.semester_ID IN (SELECT cs.semester_ID FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN WHERE e.student_ID = ?)
+      ORDER BY sem.start_Date', [$u['id'], $u['id']]);
+    if (!$sems) return ['title' => 'Semester grades', 'subtitle' => 'You have no courses yet.', 'blocks' => []];
+    $graded = array_column(rows('SELECT DISTINCT semester_ID FROM Student_History WHERE student_ID = ?', [$u['id']]), 'semester_ID');
+    $default = end($sems)['semester_ID'];
+    foreach ($sems as $x) if (in_array($x['semester_ID'], $graded, true)) $default = $x['semester_ID'];
+    $sem = in_array($q['semester'] ?? null, array_column($sems, 'semester_ID'), true) ? $q['semester'] : $default;
+    $name = array_values(array_filter($sems, fn ($x) => $x['semester_ID'] === $sem))[0]['semester_Name'];
+    $sum = one("SELECT ROUND(SUM(" . GPA_POINTS . " * c.course_Credits) / SUM(c.course_Credits), 2) AS gpa,
+        SUM(IF(h.grade <> 'F', c.course_Credits, 0)) AS earned, COUNT(*) AS n
+      FROM Student_History h JOIN Course c ON c.course_ID = h.course_ID WHERE h.student_ID = ? AND h.semester_ID = ?", [$u['id'], $sem]);
+    return ['title' => 'Semester grades', 'blocks' => [
+        ['type' => 'filters', 'filters' => [['name' => 'semester', 'label' => 'Semester', 'value' => $sem,
+            'options' => array_map(fn ($x) => [$x['semester_ID'], $x['semester_Name']], $sems)]]],
+        stats([["$name GPA", $sum['n'] ? $sum['gpa'] : 'No grades yet'], ['Credits earned', $sum['earned'] ?? 0], ['Courses graded', $sum['n']]]),
+        table("$name grades", "SELECT c.course_ID AS Course, c.course_Name AS Title, c.course_Credits AS Credits, h.grade AS Grade
+          FROM Student_History h JOIN Course c ON c.course_ID = h.course_ID
+          WHERE h.student_ID = ? AND h.semester_ID = ?
+          UNION ALL
+          SELECT c.course_ID, c.course_Name, c.course_Credits, 'In progress'
+          FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN JOIN Course c ON c.course_ID = cs.course_ID
+          WHERE e.student_ID = ? AND cs.semester_ID = ?
+            AND e.CRN NOT IN (SELECT CRN FROM Student_History WHERE student_ID = ?)
+          ORDER BY Course", [$u['id'], $sem, $u['id'], $sem, $u['id']]),
+    ]];
+}
+
+// Degree audit (S-R9): every required course of each major and minor, and where the student stands on it.
+function viewDegreeAudit(array $u, array $q): array
+{
+    $programs = rows("SELECT 'Major' AS kind, m.major_ID AS id, m.major_Name AS name FROM Student_Major sm
+        JOIN Major m ON m.major_ID = sm.major_ID JOIN Student s ON s.student_ID = sm.student_ID
+        WHERE sm.student_ID = ? ORDER BY sm.major_ID = s.major_ID DESC", [$u['id']]);
+    foreach (rows("SELECT 'Minor' AS kind, n.minor_ID AS id, n.minor_Name AS name FROM Student_Minor sm
+        JOIN Minor n ON n.minor_ID = sm.minor_ID WHERE sm.student_ID = ?", [$u['id']]) as $n) $programs[] = $n;
+    $cur = currentSemester();
+    $next = nextSemester();
+    $summary = [];
+    $blocks = [];
+    foreach ($programs as $p) {
+        $table = $p['kind'] === 'Major' ? 'Major_Course_Requirement' : 'Minor_Course_Requirement';
+        $key = $p['kind'] === 'Major' ? 'major_ID' : 'minor_ID';
+        // Best grade earned in each required course, and whether the student is taking it now or next semester.
+        $reqs = rows("SELECT c.course_ID, c.course_Name, c.course_Credits, r.min_Grade_Req,
+            (SELECT h.grade FROM Student_History h WHERE h.student_ID = ? AND h.course_ID = c.course_ID
+              ORDER BY FIELD(h.grade, " . GRADE_ORDER . ") DESC LIMIT 1) AS best,
+            (SELECT GROUP_CONCAT(sem.semester_Name ORDER BY sem.start_Date DESC) FROM Student_History h JOIN Semester sem ON sem.semester_ID = h.semester_ID
+              WHERE h.student_ID = ? AND h.course_ID = c.course_ID) AS taken,
+            (SELECT cs.semester_ID FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN
+              WHERE e.student_ID = ? AND cs.course_ID = c.course_ID AND cs.semester_ID IN (?, ?) LIMIT 1) AS enrolled
+          FROM $table r JOIN Course c ON c.course_ID = r.course_ID WHERE r.$key = ? ORDER BY c.course_ID",
+            [$u['id'], $u['id'], $u['id'], $cur['id'] ?? '', $next['id'] ?? '', $p['id']]);
+        $order = explode(',', str_replace("'", '', GRADE_ORDER));
+        $done = 0;
+        $rows = [];
+        foreach ($reqs as $r) {
+            $met = $r['best'] !== null && array_search($r['best'], $order, true) >= array_search($r['min_Grade_Req'], $order, true);
+            if ($met) { $status = 'Completed'; $done++; }
+            elseif ($r['enrolled'] === ($cur['id'] ?? null)) $status = 'In progress';
+            elseif ($r['enrolled'] !== null) $status = 'Registered for ' . $next['name'];
+            elseif ($r['best'] !== null) $status = 'Grade below minimum';
+            else $status = 'Not started';
+            $rows[] = [$r['course_ID'], $r['course_Name'], $r['course_Credits'], $r['min_Grade_Req'], $r['best'] ?? '—', $r['taken'] ?? '—', $status];
+        }
+        $summary[] = [$p['name'], count($reqs) ? "$done of " . count($reqs) . ' courses' : 'No requirements'];
+        $blocks[] = ['type' => 'table', 'title' => "{$p['kind']}: {$p['name']}", 'note' => null,
+            'columns' => ['Course', 'Title', 'Credits', 'Minimum grade', 'Your grade', 'Taken', 'Status'], 'rows' => $rows];
+    }
+    return ['title' => 'Degree audit', 'subtitle' => 'Required courses for each of your programs. A course counts once you earn at least its minimum grade.',
+        'blocks' => [stats($summary), ...$blocks]];
+}
+
+// A student's majors and minors, with the forms to declare, change and drop them (S-R24 to S-R30).
+function viewMyPrograms(array $u, array $q): array
+{
+    $mine = rows("SELECT m.major_ID AS `Major ID`, m.major_Name AS Major, d.dept_Name AS Department,
+        DATE_FORMAT(sm.date_Of_Choice, '%b %e, %Y') AS `Declared on`, IF(s.major_ID = m.major_ID, 'Primary', 'Second') AS `Role`
+      FROM Student_Major sm JOIN Major m ON m.major_ID = sm.major_ID JOIN Department d ON d.dept_ID = m.dept_ID
+      JOIN Student s ON s.student_ID = sm.student_ID WHERE sm.student_ID = ? ORDER BY s.major_ID = m.major_ID DESC", [$u['id']]);
+    $myMinors = rows("SELECT n.minor_ID AS `Minor ID`, n.minor_Name AS Minor, d.dept_Name AS Department,
+        DATE_FORMAT(sm.date_Of_Choice, '%b %e, %Y') AS `Declared on`
+      FROM Student_Minor sm JOIN Minor n ON n.minor_ID = sm.minor_ID JOIN Department d ON d.dept_ID = n.dept_ID WHERE sm.student_ID = ?", [$u['id']]);
+    $majorIds = array_column($mine, 'Major ID');
+    $minorIds = array_column($myMinors, 'Minor ID');
+    $mark = fn (string $id, string $name, array $have) => [$id, $name . (in_array($id, $have, true) ? ' (yours)' : '')];
+    $majors = array_map(fn ($m) => $mark($m['major_ID'], $m['major_Name'], $majorIds), rows('SELECT major_ID, major_Name FROM Major ORDER BY major_Name'));
+    $minors = array_map(fn ($n) => $mark($n['minor_ID'], $n['minor_Name'], $minorIds), rows('SELECT minor_ID, minor_Name FROM Minor ORDER BY minor_Name'));
+    $firstOther = fn (array $options, array $have) => (array_values(array_filter($options, fn ($o) => !in_array($o[0], $have, true)))[0] ?? $options[0])[0];
+    $asTable = fn (string $title, array $list, string $empty) => ['type' => 'table', 'title' => $title, 'note' => $list ? null : $empty,
+        'columns' => $list ? array_keys($list[0]) : [], 'rows' => array_map('array_values', $list)];
+    $form = fn (string $title, string $endpoint, string $submit, array $fields) =>
+        ['type' => 'form', 'title' => $title, 'endpoint' => $endpoint, 'submit' => $submit, 'fields' => $fields];
+    $myMajorOptions = array_map(fn ($m) => [$m['Major ID'], $m['Major']], $mine);
+    $myMinorOptions = $myMinors ? array_map(fn ($n) => [$n['Minor ID'], $n['Minor']], $myMinors) : [['', 'You have no minor']];
+
+    return ['title' => 'My majors & minors', 'subtitle' => 'You can have up to 2 majors and 1 minor. Your advisors follow your programs.', 'blocks' => [
+        $asTable('My majors', $mine, ''),
+        $asTable('My minor', $myMinors, 'You have not declared a minor.'),
+        $form('Add a major', 'add-major', 'Add major', [
+            ['name' => 'major_ID', 'label' => 'Major', 'value' => $firstOther($majors, $majorIds), 'options' => $majors]]),
+        $form('Change a major', 'change-major', 'Change major', [
+            ['name' => 'from_ID', 'label' => 'Current major', 'value' => $myMajorOptions[0][0], 'options' => $myMajorOptions],
+            ['name' => 'major_ID', 'label' => 'New major', 'value' => $firstOther($majors, $majorIds), 'options' => $majors]]),
+        $form('Drop a major', 'drop-major', 'Drop major', [
+            ['name' => 'major_ID', 'label' => 'Major', 'value' => $majorIds[0] ?? '', 'options' => $majors]]),
+        $form('Add a minor', 'add-minor', 'Add minor', [
+            ['name' => 'minor_ID', 'label' => 'Minor', 'value' => $firstOther($minors, $minorIds), 'options' => $minors]]),
+        $form('Change a minor', 'change-minor', 'Change minor', [
+            ['name' => 'from_ID', 'label' => 'Current minor', 'value' => $myMinorOptions[0][0], 'options' => $myMinorOptions],
+            ['name' => 'minor_ID', 'label' => 'New minor', 'value' => $firstOther($minors, $minorIds), 'options' => $minors]]),
+        $form('Drop a minor', 'drop-minor', 'Drop minor', [
+            ['name' => 'minor_ID', 'label' => 'Minor', 'value' => $minorIds[0] ?? $minors[0][0], 'options' => $minors]]),
+        table('My advisors', "SELECT CONCAT(u.first_Name, ' ', u.last_Name) AS Advisor,
+            (SELECT GROUP_CONCAT(d.dept_Name SEPARATOR ', ') FROM Faculty_Department fd JOIN Department d ON d.dept_ID = fd.dept_ID WHERE fd.faculty_ID = a.faculty_ID) AS Department,
+            DATE_FORMAT(a.date_Of_Appointment, '%b %e, %Y') AS Since
+          FROM Advisor a JOIN User u ON u.user_ID = a.faculty_ID WHERE a.student_ID = ?", [$u['id']]),
+    ]];
+}
+
 // ---------------- Faculty ----------------
 
 function viewTeaching(array $u, array $q): array
@@ -358,8 +482,8 @@ function viewCreateSection(array $u, array $q): array
       ORDER BY r.room_ID");
     $v = fn (string $name, string $fallback) => isset($q[$name]) ? (string) $q[$name] : $fallback;
     return ['title' => 'Create a course section', 'blocks' => [
-        ['type' => 'form', 'title' => "New section for {$sem['semester_Name']}", 'endpoint' => 'create-section', 'submit' => 'Create section', 'fields' => [
-            ['name' => 'semester_ID', 'label' => 'Semester', 'value' => $sem['semester_ID'], 'reload' => true,
+        ['type' => 'form', 'title' => "New section for {$sem['semester_Name']}", 'endpoint' => 'create-section', 'submit' => 'Create section', 'keep' => true, 'fields' => [
+            ['name' => 'semester_ID', 'label' => 'Semester', 'value' => $sem['semester_ID'], 'reload' => 'semester',
                 'options' => array_map(fn ($x) => [$x['semester_ID'], $x['semester_Name']], $sems)],
             ['name' => 'course_ID', 'label' => 'Course', 'value' => $v('course_ID', 'CS455'),
                 'options' => array_map(fn ($c) => [$c['course_ID'], "{$c['course_ID']} {$c['course_Name']}"], $courses)],
@@ -438,9 +562,14 @@ function viewCatalog(array $u, array $q): array
     $deptId = in_array($q['dept'] ?? null, array_column($depts, 'dept_ID'), true) ? $q['dept'] : $depts[0]['dept_ID'];
     $cur = currentSemester();
     return ['title' => 'Course catalog', 'blocks' => [
+        table('University departments', "SELECT d.dept_Name AS Department, CONCAT(u.first_Name, ' ', u.last_Name) AS Chair,
+            CONCAT(b.building_Name, ' ', r.room_No) AS Office, d.phone_No AS Phone, d.email AS Email,
+            (SELECT COUNT(*) FROM Course c WHERE c.dept_ID = d.dept_ID) AS Courses
+          FROM Department d LEFT JOIN User u ON u.user_ID = d.chair_ID LEFT JOIN Room r ON r.room_ID = d.office_ID
+          LEFT JOIN Building b ON b.building_ID = r.building_ID ORDER BY d.dept_Name"),
         ['type' => 'filters', 'filters' => [['name' => 'dept', 'label' => 'Department', 'value' => $deptId,
             'options' => array_map(fn ($d) => [$d['dept_ID'], $d['dept_Name']], $depts)]]],
-        table('Courses', "SELECT c.course_ID AS Course, c.course_Name AS Title, c.course_Credits AS Credits, c.course_Type AS Level,
+        table('Courses in this department', "SELECT c.course_ID AS Course, c.course_Name AS Title, c.course_Credits AS Credits, c.course_Type AS Level,
             COALESCE((SELECT GROUP_CONCAT(CONCAT(cp.prerequisite_Course_ID, ' (min ', cp.min_Grade_Req, ')') SEPARATOR ', ')
               FROM Course_Prerequisite cp WHERE cp.course_ID = c.course_ID), '—') AS Prerequisites
           FROM Course c WHERE c.dept_ID = ? ORDER BY c.course_ID", [$deptId]),
@@ -457,23 +586,163 @@ function viewCatalog(array $u, array $q): array
     ]];
 }
 
+// Majors and minors offered (S-R14, S-R16) and the course requirements of a selected one (S-R15, S-R17).
+function viewPrograms(array $u, array $q): array
+{
+    $majors = rows("SELECT m.major_ID, m.major_Name, d.dept_Name,
+        (SELECT c.course_Type FROM Major_Course_Requirement r JOIN Course c ON c.course_ID = r.course_ID WHERE r.major_ID = m.major_ID LIMIT 1) AS level,
+        (SELECT COUNT(*) FROM Major_Course_Requirement r WHERE r.major_ID = m.major_ID) AS n
+      FROM Major m JOIN Department d ON d.dept_ID = m.dept_ID ORDER BY d.dept_Name, level DESC");
+    $minors = rows('SELECT n.minor_ID, n.minor_Name, d.dept_Name, (SELECT COUNT(*) FROM Minor_Course_Requirement r WHERE r.minor_ID = n.minor_ID) AS n
+      FROM Minor n JOIN Department d ON d.dept_ID = n.dept_ID ORDER BY d.dept_Name');
+    $options = [...array_map(fn ($m) => ["major:{$m['major_ID']}", "Major: {$m['major_Name']}"], $majors),
+        ...array_map(fn ($n) => ["minor:{$n['minor_ID']}", "Minor: {$n['minor_Name']}"], $minors)];
+    $pick = in_array($q['program'] ?? null, array_column($options, 0), true) ? $q['program'] : $options[0][0];
+    [$kind, $id] = explode(':', $pick);
+    $name = substr(array_values(array_filter($options, fn ($o) => $o[0] === $pick))[0][1], 7);
+    $table = $kind === 'major' ? 'Major_Course_Requirement' : 'Minor_Course_Requirement';
+    return ['title' => 'Majors & minors', 'blocks' => [
+        ['type' => 'table', 'title' => 'Majors offered', 'note' => null, 'columns' => ['Major', 'Department', 'Level', 'Required courses'],
+            'rows' => array_map(fn ($m) => [$m['major_Name'], $m['dept_Name'], $m['level'], $m['n']], $majors)],
+        ['type' => 'table', 'title' => 'Minors offered', 'note' => null, 'columns' => ['Minor', 'Department', 'Required courses'],
+            'rows' => array_map(fn ($n) => [$n['minor_Name'], $n['dept_Name'], $n['n']], $minors)],
+        ['type' => 'filters', 'filters' => [['name' => 'program', 'label' => 'Show requirements for', 'value' => $pick, 'options' => $options]]],
+        table("Course requirements: $name", "SELECT c.course_ID AS Course, c.course_Name AS Title, c.course_Credits AS Credits,
+            r.min_Grade_Req AS `Minimum grade`,
+            COALESCE((SELECT GROUP_CONCAT(cp.prerequisite_Course_ID SEPARATOR ', ') FROM Course_Prerequisite cp WHERE cp.course_ID = c.course_ID), '—') AS Prerequisites
+          FROM $table r JOIN Course c ON c.course_ID = r.course_ID WHERE r.{$kind}_ID = ? ORDER BY c.course_ID", [$id]),
+    ]];
+}
+
+// Prerequisite search (S-R19): find a course by its ID or part of its title.
+function viewPrereqSearch(array $u, array $q): array
+{
+    $term = trim((string) ($q['course'] ?? ''));
+    $blocks = [['type' => 'form', 'title' => 'Search for a course', 'method' => 'view', 'submit' => 'Search', 'fields' => [
+        ['name' => 'course', 'label' => 'Course ID or title', 'value' => $term, 'placeholder' => 'For example CS455 or Calculus']]]];
+    if ($term === '') return ['title' => 'Prerequisite search', 'subtitle' => 'See which courses you must pass first, and the minimum grade.', 'blocks' => $blocks];
+
+    $id = strtoupper(preg_replace('/\s+/', '', $term));
+    $courses = rows('SELECT course_ID, course_Name FROM Course WHERE course_ID = ? OR course_Name LIKE ? ORDER BY course_ID',
+        [$id, '%' . addcslashes($term, '%_\\') . '%']);
+    if (!$courses) {
+        $blocks[] = ['type' => 'message', 'ok' => false, 'heading' => 'No result', 'message' => "No course matches \"$term\". Check the course ID, for example CS455."];
+    } else {
+        $ids = array_column($courses, 'course_ID');
+        $marks = implode(', ', array_fill(0, count($ids), '?'));
+        $result = table('Prerequisites', "SELECT cp.course_ID AS Course, c.course_Name AS Title, cp.prerequisite_Course_ID AS Prerequisite,
+            p.course_Name AS `Prerequisite title`, cp.min_Grade_Req AS `Minimum grade`
+          FROM Course_Prerequisite cp JOIN Course c ON c.course_ID = cp.course_ID JOIN Course p ON p.course_ID = cp.prerequisite_Course_ID
+          WHERE cp.course_ID IN ($marks) ORDER BY cp.course_ID, cp.prerequisite_Course_ID", $ids);
+        if (!$result['rows']) {
+            $list = implode(', ', array_map(fn ($c) => "{$c['course_ID']} {$c['course_Name']}", array_slice($courses, 0, 5)));
+            $blocks[] = ['type' => 'message', 'ok' => false, 'heading' => 'No result', 'message' => "No prerequisite record was found: $list " . (count($courses) === 1 ? 'has' : 'have') . ' no prerequisites.'];
+        } else {
+            $without = array_diff($ids, array_column($result['rows'], 0));
+            if ($without) $result['note'] = 'Also matched, with no prerequisites: ' . implode(', ', $without) . '.';
+            $blocks[] = $result;
+        }
+    }
+    return ['title' => 'Prerequisite search', 'subtitle' => 'See which courses you must pass first, and the minimum grade.', 'blocks' => $blocks];
+}
+
+// The signed-in user's own account: address (S-R20) and password (S-R21). The ID and email can't be changed (S-F14, S-F15).
+function viewAccount(array $me, array $q): array
+{
+    $u = one('SELECT u.*, l.user_Email FROM User u JOIN Login l ON l.user_ID = u.user_ID WHERE u.user_ID = ?', [$me['id']]);
+    return ['title' => 'My account', 'subtitle' => 'Your ID and campus email cannot be changed.', 'blocks' => [
+        stats([['Name', trim("{$u['first_Name']} " . ($u['middle_Name'] ? "{$u['middle_Name']} " : '') . $u['last_Name'])],
+            ['ID', $u['user_ID']], ['Campus email', $u['user_Email']],
+            ['Address', $u['street'] ? "{$u['street']}, {$u['city']}, {$u['state']} {$u['zip_Code']}" : 'Not on file']]),
+        ['type' => 'form', 'title' => 'Update address', 'endpoint' => 'update-address', 'submit' => 'Save address', 'fields' => [
+            ['name' => 'street', 'label' => 'Street', 'value' => $u['street'] ?? ''],
+            ['name' => 'city', 'label' => 'City', 'value' => $u['city'] ?? ''],
+            ['name' => 'state', 'label' => 'State (2 letters)', 'value' => $u['state'] ?? ''],
+            ['name' => 'zip_Code', 'label' => 'ZIP code', 'value' => $u['zip_Code'] ?? ''],
+        ]],
+        ['type' => 'form', 'title' => 'Change password', 'endpoint' => 'change-password', 'submit' => 'Change password', 'fields' => [
+            ['name' => 'current', 'label' => 'Current password', 'type' => 'password', 'value' => ''],
+            ['name' => 'password', 'label' => 'New password', 'type' => 'password', 'value' => ''],
+            ['name' => 'confirm', 'label' => 'Confirm new password', 'type' => 'password', 'value' => ''],
+        ], 'note' => 'At least 8 characters, with a letter and a number.'],
+    ]];
+}
+
+// Create a user (A-R5). The fields depend on the type of user, so choosing a type reloads the form.
+function viewCreateUser(array $u, array $q): array
+{
+    $roles = [['Student', 'Student'], ['Faculty', 'Faculty'], ['Admin', 'Admin'], ['StatDept', 'Stat-Dept member']];
+    $role = in_array($q['role'] ?? null, array_column($roles, 0), true) ? $q['role'] : 'Student';
+    $level = one('SELECT security_Level FROM Admin WHERE admin_ID = ?', [$u['id']])['security_Level'];
+    $fields = [
+        ['name' => 'role', 'label' => 'Type of user', 'value' => $role, 'options' => $roles, 'reload' => 'role'],
+        ['name' => 'first_Name', 'label' => 'First name', 'value' => ''],
+        ['name' => 'middle_Name', 'label' => 'Middle name (optional)', 'value' => ''],
+        ['name' => 'last_Name', 'label' => 'Last name', 'value' => ''],
+        ['name' => 'gender', 'label' => 'Gender', 'value' => '', 'options' => [['', 'Choose…'], ['Female', 'Female'], ['Male', 'Male'], ['Other', 'Other']]],
+        ['name' => 'DOB', 'label' => 'Date of birth', 'type' => 'date', 'value' => ''],
+    ];
+    $load = ['name' => 'load', 'label' => 'Status', 'value' => 'Full-time', 'options' => [['Full-time', 'Full-time'], ['Part-time', 'Part-time']]];
+    if ($role === 'Student') {
+        $majors = rows("SELECT m.major_ID, m.major_Name, (SELECT c.course_Type FROM Major_Course_Requirement r JOIN Course c ON c.course_ID = r.course_ID
+            WHERE r.major_ID = m.major_ID LIMIT 1) AS level FROM Major m ORDER BY level DESC, m.major_Name");
+        $fields[] = ['name' => 'level', 'label' => 'Level', 'value' => 'Undergraduate', 'options' => [['Undergraduate', 'Undergraduate'], ['Graduate', 'Graduate']]];
+        $fields[] = $load;
+        $fields[] = ['name' => 'major_ID', 'label' => 'Major', 'value' => '', 'options' => array_merge([['', 'Choose…']],
+            array_map(fn ($m) => [$m['major_ID'], "{$m['major_Name']} ({$m['level']})"], $majors))];
+    } elseif ($role === 'Faculty') {
+        $fields[] = ['name' => 'dept_ID', 'label' => 'Department', 'value' => '', 'options' => array_merge([['', 'Choose…']],
+            array_map(fn ($d) => [$d['dept_ID'], $d['dept_Name']], departments()))];
+        $fields[] = $load;
+        $fields[] = ['name' => 'rank', 'label' => 'Rank', 'value' => 'Assistant Professor', 'options' => array_map(fn ($r) => [$r, $r], FACULTY_RANKS)];
+        $fields[] = ['name' => 'specialty', 'label' => 'Specialty (optional)', 'value' => ''];
+    } elseif ($role === 'Admin') {
+        $fields[] = ['name' => 'security_Level', 'label' => 'Security level', 'value' => 'Read-Only', 'options' => [['Read-Only', 'Read-Only'], ['Read-Write', 'Read-Write']]];
+    }
+    array_push($fields,
+        ['name' => 'street', 'label' => 'Street (optional)', 'value' => ''],
+        ['name' => 'city', 'label' => 'City (optional)', 'value' => ''],
+        ['name' => 'state', 'label' => 'State (optional)', 'value' => ''],
+        ['name' => 'zip_Code', 'label' => 'ZIP code (optional)', 'value' => ''],
+        ['name' => 'password', 'label' => 'Starting password', 'type' => 'password', 'value' => ''],
+        ['name' => 'confirm', 'label' => 'Confirm password', 'type' => 'password', 'value' => '']);
+    return ['title' => 'Create a user', 'subtitle' => $level === 'Read-Write'
+            ? 'The new user gets an ID and a campus email to sign in with.'
+            : 'You are a Read-Only admin, so creating a user will be refused.', 'blocks' => [
+        ['type' => 'form', 'title' => 'New user', 'endpoint' => 'create-user', 'submit' => 'Create user', 'fields' => $fields,
+            'note' => 'The password needs at least 8 characters, with a letter and a number.'],
+        table('Accounts created by admins', "SELECT l.user_ID AS ID, CONCAT(uu.first_Name, ' ', uu.last_Name) AS Name,
+            IF(uu.user_Type = 'StatDept', 'Stat-Dept', uu.user_Type) AS Type,
+            lg.user_Email AS Email, CONCAT(au.first_Name, ' ', au.last_Name) AS `Created by`, DATE_FORMAT(l.date_Time, '%b %e, %Y %l:%i %p') AS `Created on`
+          FROM Audit_Log l JOIN User uu ON uu.user_ID = l.user_ID JOIN User au ON au.user_ID = l.admin_ID JOIN Login lg ON lg.user_ID = l.user_ID
+          WHERE l.action_Type = 'Create' ORDER BY l.date_Time DESC, l.log_ID DESC LIMIT 10"),
+    ]];
+}
+
 // Every page: id => [sidebar label, roles allowed, function that builds it]. The order is the sidebar order.
 const VIEWS = [
     'overview' => ['Overview', ['Student'], 'viewOverview'],
     'schedule' => ['My schedule', ['Student'], 'viewSchedule'],
+    'register' => ['Register', ['Student'], 'viewRegister'],
+    'grades' => ['Grades', ['Student'], 'viewGrades'],
     'transcript' => ['Transcript', ['Student'], 'viewTranscript'],
+    'degree-audit' => ['Degree audit', ['Student'], 'viewDegreeAudit'],
     'holds-advisors' => ['Holds & advisors', ['Student'], 'viewHoldsAdvisors'],
+    'my-programs' => ['My majors & minors', ['Student'], 'viewMyPrograms'],
     'teaching' => ['My teaching', ['Faculty'], 'viewTeaching'],
     'advisees' => ['Advisees', ['Faculty'], 'viewAdvisees'],
     'admin-overview' => ['Overview', ['Admin'], 'viewAdminOverview'],
+    'create-user' => ['Create user', ['Admin'], 'viewCreateUser'],
+    'create-section' => ['Create section', ['Admin'], 'viewCreateSection'],
     'holds' => ['Student holds', ['Admin'], 'viewHolds'],
     'audit' => ['Audit log', ['Admin'], 'viewAudit'],
     'stats' => ['Statistics', ['StatDept'], 'viewStats'],
     'enrollment-counts' => ['Enrollment counts', ['StatDept'], 'viewEnrollmentCounts'],
-    'register' => ['Register', ['Student'], 'viewRegister'],
-    'create-section' => ['Create section', ['Admin'], 'viewCreateSection'],
     'master-schedule' => ['Master schedule', ['Faculty', 'Admin', 'Student'], 'viewMasterSchedule'],
     'catalog' => ['Course catalog', ['Student', 'Faculty', 'Admin', 'StatDept'], 'viewCatalog'],
+    'programs' => ['Majors & minors', ['Student', 'Faculty', 'Admin', 'StatDept'], 'viewPrograms'],
+    'prereq-search' => ['Prerequisite search', ['Student', 'Faculty', 'Admin', 'StatDept'], 'viewPrereqSearch'],
+    'account' => ['My account', ['Student', 'Faculty', 'Admin', 'StatDept'], 'viewAccount'],
 ];
 
 function viewsFor(string $role): array

@@ -1,4 +1,4 @@
-// Page logic: welcome page, sign in / sign up / reset, and the dashboard.
+// Page logic: welcome page, sign in / password reset, and the dashboard.
 const welcomePage = document.getElementById('welcome-page');
 const loginPage = document.getElementById('login-page');
 const dashboardPage = document.getElementById('dashboard-page');
@@ -46,9 +46,9 @@ async function openView(id, params = {}, flash = null) {
   blocks.replaceChildren(...(flash ? [renderFlash(flash)] : []), ...(page.blocks || []).map((b) => renderBlock(b, id)));
 }
 
-function renderFlash({ ok, message }) {
+function renderFlash({ ok, message, heading }) {
   const box = el('div', ok ? 'flash ok' : 'flash err');
-  box.append(el('strong', null, ok ? 'Done' : 'Not allowed'), el('span', null, message));
+  box.append(el('strong', null, heading || (ok ? 'Done' : 'Not allowed')), el('span', null, message));
   return box;
 }
 
@@ -82,6 +82,7 @@ function renderBlock(block, viewId) {
     }
     return grid;
   }
+  if (block.type === 'message') return renderFlash(block);
   if (block.type === 'filters') {
     const bar = el('div', 'filters');
     for (const f of block.filters) {
@@ -118,14 +119,16 @@ function renderBlock(block, viewId) {
           o.selected = value === f.value;
           input.append(o);
         }
-        // Changing the semester reloads the form (teaching loads depend on it).
-        if (f.reload) input.addEventListener('change', () => openView(viewId, { semester: input.value }));
+        // Some choices reload the form, e.g. the semester (teaching loads depend on it) or the type of user.
+        if (f.reload) input.addEventListener('change', () => openView(viewId, { [f.reload]: input.value }));
       } else {
         input = el('input');
         input.type = f.type || 'text';
         if (f.min !== undefined) input.min = f.min;
         if (f.max !== undefined) input.max = f.max;
         input.value = f.value;
+        if (f.placeholder) input.placeholder = f.placeholder;
+        if (f.type === 'password') input.autocomplete = 'new-password';
       }
       input.name = f.name;
       label.append(input);
@@ -133,12 +136,17 @@ function renderBlock(block, viewId) {
     }
     const button = el('button', 'primary', block.submit);
     button.type = 'submit';
-    card.append(grid, button);
+    card.append(grid);
+    if (block.note) card.append(el('p', 'muted small', block.note));
+    card.append(button);
     card.addEventListener('submit', async (e) => {
       e.preventDefault();
       button.disabled = true;
       const body = Object.fromEntries(new FormData(card));
-      currentParams = { semester: body.semester_ID, ...body };
+      // A search form only reloads the page with its values; other forms change the database.
+      if (block.method === 'view') return openView(viewId, body);
+      // Only forms that ask for it keep their values after saving (never passwords).
+      if (block.keep) currentParams = { semester: body.semester_ID, ...body };
       await runAction(block.endpoint, body);
     });
     return card;
@@ -247,71 +255,19 @@ document.getElementById('logout').addEventListener('click', async () => {
   showWelcome();
 });
 
-// ---------- Switching between sign in, sign up and password reset ----------
-const authViews = ['login-view', 'signup-view', 'signup-done', 'reset-view'];
+// ---------- Switching between sign in and password reset ----------
+const authViews = ['login-view', 'reset-view'];
 function showAuthView(id) {
   for (const v of authViews) document.getElementById(v).hidden = v !== id;
 }
 document.querySelectorAll('[data-show]').forEach((a) => a.addEventListener('click', (e) => {
   e.preventDefault();
-  if (a.dataset.show === 'signup-view') loadMajors();
   showAuthView(a.dataset.show);
 }));
 
 function showBox(target, kind, text) {
   target.replaceChildren(el('div', kind, text));
 }
-
-// ---------- Sign up ----------
-const signupForm = document.getElementById('signup-form');
-let majorsLoaded = false;
-async function loadMajors() {
-  if (majorsLoaded) return;
-  const { majors } = await (await fetch('/api/majors')).json();
-  const select = document.getElementById('major-select');
-  for (const m of majors) {
-    const o = el('option', null, m.major_Name);
-    o.value = m.major_ID;
-    select.append(o);
-  }
-  majorsLoaded = true;
-}
-
-let newAccountEmail = '';
-signupForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const button = signupForm.querySelector('button[type=submit]');
-  button.disabled = true;
-  const msg = document.getElementById('signup-message');
-  msg.replaceChildren();
-  try {
-    const res = await fetch('/api/signup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(Object.fromEntries(new FormData(signupForm))),
-    });
-    const data = await res.json();
-    if (!res.ok) return showBox(msg, 'error', data.error);
-    newAccountEmail = data.email;
-    const facts = [['Student ID', data.id], ['Campus email', data.email], ['Name', data.name], ['Major', data.major], ['Advisor', data.advisor || 'Not assigned yet']];
-    document.getElementById('signup-facts').replaceChildren(...facts.map(([label, value]) => {
-      const card = el('div', 'stat');
-      card.append(el('span', 'stat-label', label), el('strong', 'stat-value', String(value)));
-      return card;
-    }));
-    signupForm.reset();
-    showAuthView('signup-done');
-  } finally {
-    button.disabled = false;
-  }
-});
-document.getElementById('signup-signin').addEventListener('click', () => {
-  showAuthView('login-view');
-  form.reset();
-  message.replaceChildren();
-  form.email.value = newAccountEmail;
-  form.password.focus();
-});
 
 // ---------- Password reset ----------
 const resetForm = document.getElementById('reset-form');
@@ -356,16 +312,12 @@ function showWelcome() {
   loadWelcome();
 }
 
-// Buttons and links with data-go open the welcome page, sign in or sign up.
+// Buttons and links with data-go open the welcome page or the sign-in form.
 document.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', (e) => {
   e.preventDefault();
   const go = b.dataset.go;
   if (go === 'welcome') return showWelcome();
   showLogin();
-  if (go === 'signup') {
-    loadMajors();
-    showAuthView('signup-view');
-  }
   history.replaceState(null, '', `#${go}`);
   window.scrollTo(0, 0);
 }));
@@ -397,7 +349,7 @@ async function loadWelcome() {
   }
 }
 
-// On first load: signed in → dashboard; #login / #signup → that form; otherwise the welcome page.
+// On first load: signed in → dashboard; #login → the sign-in form; otherwise the welcome page.
 fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then((d) => {
   if (d) return showDashboard(d.user);
   const hash = location.hash.slice(1);
