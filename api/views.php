@@ -43,14 +43,28 @@ const SECTION_JOINS = 'JOIN Course c ON c.course_ID = cs.course_ID
 const INSTRUCTOR = "CONCAT(fu.first_Name, ' ', fu.last_Name) AS Instructor";
 const SEATS = 'cs.available_Seats AS `Open seats`';
 const ORDER_BY_TIME = "ORDER BY FIELD(LEFT(Days, 1),'M','T','W','R','F'), p.start_Time";
+
+// A section's separate lab meeting (Course_Section_Lab), alongside its lecture columns above.
+// Blank/— for sections without one (every section except the four-credit Biology ones) --
+// LAB_JOINS is all LEFT JOINs, so CONCAT()/the subquery naturally come back NULL, not an error.
+const LAB_COLUMNS = "(SELECT GROUP_CONCAT(ld.day_ID ORDER BY FIELD(ld.day_ID,'M','T','W','R','F') SEPARATOR '')
+     FROM Time_Slot_Day ld WHERE ld.time_Slot_ID = csl.time_Slot_ID) AS `Lab days`,
+  CONCAT(TIME_FORMAT(lp.start_Time, '%l:%i %p'), ' – ', TIME_FORMAT(lp.end_Time, '%l:%i %p')) AS `Lab time`,
+  CONCAT(lb.building_Name, ' ', lr.room_No) AS `Lab room`";
+const LAB_JOINS = 'LEFT JOIN Course_Section_Lab csl ON csl.CRN = cs.CRN
+  LEFT JOIN Time_Slot_Period ltp ON ltp.time_Slot_ID = csl.time_Slot_ID
+  LEFT JOIN Period lp ON lp.period_ID = ltp.period_ID
+  LEFT JOIN Room lr ON lr.room_ID = csl.lab_ID
+  LEFT JOIN Building lb ON lb.building_ID = lr.building_ID';
 const GPA_POINTS = "CASE h.grade WHEN 'A' THEN 4 WHEN 'A-' THEN 3.7 WHEN 'B+' THEN 3.3 WHEN 'B' THEN 3 WHEN 'B-' THEN 2.7
   WHEN 'C+' THEN 2.3 WHEN 'C' THEN 2 WHEN 'C-' THEN 1.7 WHEN 'D+' THEN 1.3 WHEN 'D' THEN 1 ELSE 0 END";
 
-// One student's sections in one semester.
+// One student's sections in one semester. Includes each section's lab meeting
+// (Course_Section_Lab), when it has one, alongside its lecture.
 function studentSchedule(string $title, int $studentId, string $semesterId, ?string $note = null): array
 {
-    return table($title, 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ' FROM Enrollment e
-      JOIN Course_Section cs ON cs.CRN = e.CRN ' . SECTION_JOINS . '
+    return table($title, 'SELECT ' . SECTION_COLUMNS . ', ' . LAB_COLUMNS . ', ' . INSTRUCTOR . ' FROM Enrollment e
+      JOIN Course_Section cs ON cs.CRN = e.CRN ' . SECTION_JOINS . ' ' . LAB_JOINS . '
       WHERE e.student_ID = ? AND cs.semester_ID = ? ' . ORDER_BY_TIME, [$studentId, $semesterId], $note);
 }
 
@@ -550,8 +564,8 @@ function viewMasterSchedule(array $u, array $q): array
     [$semester, $deptId, $filters] = semesterFilter($q);
     return ['title' => 'Semester master schedule', 'blocks' => [
         $filters,
-        table('Course sections', 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . SEATS . '
-          FROM Course_Section cs ' . SECTION_JOINS . "
+        table('Course sections', 'SELECT ' . SECTION_COLUMNS . ', ' . LAB_COLUMNS . ', ' . INSTRUCTOR . ', ' . SEATS . '
+          FROM Course_Section cs ' . SECTION_JOINS . ' ' . LAB_JOINS . "
           WHERE cs.semester_ID = ? AND (? = '' OR c.dept_ID = ?) ORDER BY cs.course_ID, cs.section_No", [$semester, $deptId, $deptId]),
     ]];
 }
