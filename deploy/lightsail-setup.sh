@@ -108,7 +108,10 @@ APP_BLOCK="    root $APP_DIR/public;
     index index.html;
 
     # The website: HTML, CSS and JavaScript files. Unknown addresses get a 404.
+    # no-cache: browsers keep their copy but check it is still current on every visit (a quick
+    # 304 when unchanged), so a git pull shows up right away instead of mixing old and new files.
     location / {
+        add_header Cache-Control \"no-cache\" always;
         try_files \$uri \$uri/ =404;
     }
 
