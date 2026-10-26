@@ -194,7 +194,7 @@ sleep 1
 if curl -sk -o /dev/null -w '%{http_code}' "${CHECK[@]}" | grep -q 401; then
   echo
   echo "Campus Connect is running: $URL"
-  echo "PHP errors:  sudo tail -n 50 /var/log/nginx/error.log"
+  echo "Setup finished. If a page ever shows an error, see the details with:  sudo tail -n 50 /var/log/nginx/error.log"
 else
   echo "The site did not answer. Check: sudo tail -n 50 /var/log/nginx/error.log" >&2
   exit 1
