@@ -376,6 +376,20 @@ CREATE TABLE Course_Section (
   FOREIGN KEY (semester_ID)  REFERENCES Semester(semester_ID)
 );
 
+-- A section's separate weekly lab meeting (e.g. the 4-credit Biology sections: two
+-- weekly lecture meetings via Course_Section.time_Slot_ID, plus one 150-minute lab
+-- meeting here). One lab meeting per section, so CRN alone is the primary key.
+-- time_Slot_ID follows the same normalized Time_Slot/Time_Slot_Day/Time_Slot_Period/
+-- Day/Period path as Course_Section itself, rather than storing day/start/end directly.
+CREATE TABLE Course_Section_Lab (
+  CRN          INT         PRIMARY KEY,
+  lab_ID       VARCHAR(10) NOT NULL,
+  time_Slot_ID INT         NOT NULL,
+  FOREIGN KEY (CRN)          REFERENCES Course_Section(CRN) ON DELETE CASCADE,
+  FOREIGN KEY (lab_ID)       REFERENCES Lab(lab_ID),
+  FOREIGN KEY (time_Slot_ID) REFERENCES Time_Slot(time_Slot_ID)
+);
+
 -- ---------- Registration, grades, attendance ----------
 
 CREATE TABLE Enrollment (
