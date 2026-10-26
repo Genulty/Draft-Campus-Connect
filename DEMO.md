@@ -44,7 +44,7 @@ On the server:
 sudo mysql campus_connect -e "SELECT * FROM Enrollment WHERE student_ID = 100001 AND CRN = 10556"
 sudo mysql campus_connect -e "SELECT CRN, max_Seats, available_Seats FROM Course_Section WHERE CRN = 10556"
 sudo mysql campus_connect -e "SELECT * FROM Course_Section ORDER BY CRN DESC LIMIT 3"
-sudo mysql -t campus_connect < db/validate.sql   # all 27 checks still show 0 violations
+sudo mysql -t campus_connect < db/validate.sql   # 29 rule checks; each should show 0 violations
 ```
 
 ## 6. Admin creates a new user, then the new student signs in

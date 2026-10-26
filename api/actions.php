@@ -8,22 +8,24 @@ const GRADE_ORDER = "'F','D','D+','C-','C','C+','B-','B','B+','A-','A'";
 const MAX_CREDITS = ['Full-time' => 16, 'Part-time' => 8];  // S-F7, S-F8
 const TEACH_LOAD = ['Full-time' => 2, 'Part-time' => 1];    // A-F7, A-F8
 
-// Sections that meet on a shared day in the same period clash.
-const CLASH = "EXISTS (SELECT 1 FROM Time_Slot_Day d1 JOIN Time_Slot_Day d2 ON d2.day_ID = d1.day_ID
-    JOIN Time_Slot_Period p1 ON p1.time_Slot_ID = d1.time_Slot_ID
-    JOIN Time_Slot_Period p2 ON p2.time_Slot_ID = d2.time_Slot_ID AND p2.period_ID = p1.period_ID
-  WHERE d1.time_Slot_ID = cs.time_Slot_ID AND d2.time_Slot_ID = ?)";
+// Every weekly meeting of every section: its lecture (Course_Section) plus its separate lab meeting
+// (Course_Section_Lab) when it has one, with the room and teacher of each.
+const MEETINGS = "(SELECT cs.CRN, cs.course_ID, cs.semester_ID, cs.faculty_ID, cs.room_ID, cs.time_Slot_ID FROM Course_Section cs
+  UNION ALL
+  SELECT cs.CRN, cs.course_ID, cs.semester_ID, cs.faculty_ID, l.lab_ID, l.time_Slot_ID FROM Course_Section cs
+    JOIN Course_Section_Lab l ON l.CRN = cs.CRN)";
 
-// Same clash test as CLASH, but against any one of several time slots at once (used to check
-// a section's lecture AND its Course_Section_Lab lab meeting, when it has one, in one query).
-// $column is a trusted SQL fragment (a column/alias name), never user input.
-function clashAgainstAny(string $column, int $count): string
+// Two meetings clash when they share a day and their times overlap. Times are compared, not period
+// IDs, because a 150-minute lab period overlaps several 80-minute lecture periods.
+// $column is a trusted SQL fragment (a column name), never user input; the time slots are bound as ?.
+function overlapsAny(string $column, int $count): string
 {
     $marks = implode(', ', array_fill(0, $count, '?'));
     return "EXISTS (SELECT 1 FROM Time_Slot_Day d1 JOIN Time_Slot_Day d2 ON d2.day_ID = d1.day_ID
-        JOIN Time_Slot_Period p1 ON p1.time_Slot_ID = d1.time_Slot_ID
-        JOIN Time_Slot_Period p2 ON p2.time_Slot_ID = d2.time_Slot_ID AND p2.period_ID = p1.period_ID
-      WHERE d1.time_Slot_ID = $column AND d2.time_Slot_ID IN ($marks))";
+        JOIN Time_Slot_Period tp1 ON tp1.time_Slot_ID = d1.time_Slot_ID JOIN Period p1 ON p1.period_ID = tp1.period_ID
+        JOIN Time_Slot_Period tp2 ON tp2.time_Slot_ID = d2.time_Slot_ID JOIN Period p2 ON p2.period_ID = tp2.period_ID
+      WHERE d1.time_Slot_ID = $column AND d2.time_Slot_ID IN ($marks)
+        AND p1.start_Time < p2.end_Time AND p2.start_Time < p1.end_Time)";
 }
 
 // ---------- Student: add a course section (S-R22, UC-24/25) ----------
@@ -85,14 +87,10 @@ function checkAdd(int $studentId, int $crn, bool $lock): string
     $newLab = one('SELECT time_Slot_ID FROM Course_Section_Lab WHERE CRN = ?', [$crn]);
     if ($newLab) $newSlots[] = (int) $newLab['time_Slot_ID'];
 
-    // Clashes against anything already on the student's schedule: check the new section's
-    // lecture/lab slots against each existing section's lecture AND its lab, if it has one.
-    $lectureClash = clashAgainstAny('cs.time_Slot_ID', count($newSlots));
-    $labClash = clashAgainstAny('ecl.time_Slot_ID', count($newSlots));
-    $clash = one("SELECT cs.course_ID, cs.CRN FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN
-        LEFT JOIN Course_Section_Lab ecl ON ecl.CRN = cs.CRN
-      WHERE e.student_ID = ? AND cs.semester_ID = ? AND ($lectureClash OR $labClash)",
-        [$studentId, $sec['semester_ID'], ...$newSlots, ...$newSlots]);
+    // Clashes against every meeting (lecture or lab) already on the student's schedule (S-F11).
+    $clash = one('SELECT m.course_ID, m.CRN FROM Enrollment e JOIN ' . MEETINGS . ' m ON m.CRN = e.CRN
+      WHERE e.student_ID = ? AND m.semester_ID = ? AND ' . overlapsAny('m.time_Slot_ID', count($newSlots)),
+        [$studentId, $sec['semester_ID'], ...$newSlots]);
     if ($clash) fail("$label meets at the same time as {$clash['course_ID']} (CRN {$clash['CRN']}).");
     return $label;
 }
@@ -170,11 +168,14 @@ function createSection(int $adminId, array $form): array
             fail("{$fac['name']} (" . strtolower($fac['faculty_Type']) . ') already teaches ' . count($teaching)
                 . " section(s) in {$sem['semester_Name']}.");
         }
-        $facClash = one('SELECT cs.CRN, cs.course_ID FROM Course_Section cs WHERE cs.faculty_ID = ? AND cs.semester_ID = ? AND ' . CLASH,
-            [$fac['faculty_ID'], $sem['semester_ID'], $slot['time_Slot_ID']]);
+        // The teacher and the room must be free at that time, counting lab meetings too (A-F5, A-F6).
+        $facClash = one('SELECT m.CRN, m.course_ID FROM ' . MEETINGS . ' m WHERE m.faculty_ID = ? AND m.semester_ID = ? AND '
+            . overlapsAny('m.time_Slot_ID', 1), [$fac['faculty_ID'], $sem['semester_ID'], $slot['time_Slot_ID']]);
         if ($facClash) fail("{$fac['name']} already teaches {$facClash['course_ID']} (CRN {$facClash['CRN']}) at that time.");
-        $roomClash = one('SELECT cs.CRN, cs.course_ID FROM Course_Section cs WHERE cs.room_ID = ? AND cs.semester_ID = ? AND ' . CLASH . ' FOR UPDATE',
-            [$room['room_ID'], $sem['semester_ID'], $slot['time_Slot_ID']]);
+        // Lock the room's sections for the semester first, so two admins can't book it at the same time.
+        rows('SELECT CRN FROM Course_Section WHERE room_ID = ? AND semester_ID = ? FOR UPDATE', [$room['room_ID'], $sem['semester_ID']]);
+        $roomClash = one('SELECT m.CRN, m.course_ID FROM ' . MEETINGS . ' m WHERE m.room_ID = ? AND m.semester_ID = ? AND '
+            . overlapsAny('m.time_Slot_ID', 1), [$room['room_ID'], $sem['semester_ID'], $slot['time_Slot_ID']]);
         if ($roomClash) fail("Room {$room['room_ID']} is already used by {$roomClash['course_ID']} (CRN {$roomClash['CRN']}) at that time.");
 
         $crn = (int) one('SELECT COALESCE(MAX(CRN), 10000) + 1 AS crn FROM Course_Section FOR UPDATE')['crn'];

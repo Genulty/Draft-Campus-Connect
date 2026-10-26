@@ -2,10 +2,27 @@
 --   mysql campus_connect < db/validate.sql
 USE campus_connect;
 SET @today = '2026-10-06';
-SELECT 'A-F5 faculty teaches two sections at the same time' AS rule_checked, COUNT(*) AS violations
-  FROM (SELECT faculty_ID FROM Course_Section GROUP BY faculty_ID, time_Slot_ID, semester_ID HAVING COUNT(*) > 1) x
-UNION ALL SELECT 'A-F6 two sections in one room at the same time', COUNT(*)
-  FROM (SELECT room_ID FROM Course_Section GROUP BY room_ID, time_Slot_ID, semester_ID HAVING COUNT(*) > 1) x
+-- Every weekly meeting of every section (its lecture, plus its lab when it has one) with its day and times.
+-- Two meetings clash when they share a day and their times overlap: a 150-minute lab period overlaps
+-- several lecture periods, so comparing period IDs is not enough.
+WITH meeting AS (
+  SELECT cs.CRN, cs.semester_ID, cs.faculty_ID, cs.room_ID AS room, cs.time_Slot_ID, 'Lecture' AS kind FROM Course_Section cs
+  UNION ALL
+  SELECT cs.CRN, cs.semester_ID, cs.faculty_ID, l.lab_ID, l.time_Slot_ID, 'Lab' FROM Course_Section cs JOIN Course_Section_Lab l ON l.CRN = cs.CRN
+), mt AS (
+  SELECT m.*, d.day_ID, p.start_Time, p.end_Time FROM meeting m
+  JOIN Time_Slot_Day d ON d.time_Slot_ID = m.time_Slot_ID
+  JOIN Time_Slot_Period tp ON tp.time_Slot_ID = m.time_Slot_ID JOIN Period p ON p.period_ID = tp.period_ID
+), clash AS (
+  SELECT a.CRN AS crn_a, b.CRN AS crn_b, a.faculty_ID AS fac_a, b.faculty_ID AS fac_b, a.room AS room_a, b.room AS room_b,
+         a.kind AS kind_a, b.kind AS kind_b
+  FROM mt a JOIN mt b ON b.semester_ID = a.semester_ID AND b.day_ID = a.day_ID
+    AND a.start_Time < b.end_Time AND b.start_Time < a.end_Time AND (a.CRN < b.CRN OR (a.CRN = b.CRN AND a.kind < b.kind))
+)
+SELECT 'A-F5 faculty teaches two sections at the same time' AS rule_checked, COUNT(DISTINCT crn_a, crn_b) AS violations
+  FROM clash WHERE crn_a <> crn_b AND fac_a = fac_b
+UNION ALL SELECT 'A-F6 two sections in one room at the same time', COUNT(DISTINCT crn_a, crn_b)
+  FROM clash WHERE crn_a <> crn_b AND room_a = room_b
 UNION ALL SELECT 'A-F7 full-time faculty teaching more than 2 sections', COUNT(*)
   FROM (SELECT cs.faculty_ID FROM Course_Section cs JOIN Faculty f ON f.faculty_ID = cs.faculty_ID
         WHERE f.faculty_Type = 'Full-time' GROUP BY cs.faculty_ID, cs.semester_ID HAVING COUNT(*) > 2) x
@@ -23,9 +40,9 @@ UNION ALL SELECT 'A-F9 section with more than 10 students', COUNT(*)
 UNION ALL SELECT 'A-R46 started section with fewer than 5 students', COUNT(*)
   FROM Course_Section cs JOIN Semester s ON s.semester_ID = cs.semester_ID
   WHERE s.start_Date <= @today AND (SELECT COUNT(*) FROM Enrollment e WHERE e.CRN = cs.CRN) < 5
-UNION ALL SELECT 'S-F11 student in two sections at the same time', COUNT(*)
-  FROM (SELECT e.student_ID FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN
-        GROUP BY e.student_ID, cs.time_Slot_ID, cs.semester_ID HAVING COUNT(*) > 1) x
+UNION ALL SELECT 'S-F11 student in two sections at the same time', COUNT(DISTINCT e1.student_ID, c.crn_a, c.crn_b)
+  FROM clash c JOIN Enrollment e1 ON e1.CRN = c.crn_a JOIN Enrollment e2 ON e2.CRN = c.crn_b AND e2.student_ID = e1.student_ID
+  WHERE c.crn_a <> c.crn_b
 UNION ALL SELECT 'S-F5/S-F6 undergraduate/graduate course mismatch', COUNT(*)
   FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN JOIN Course c ON c.course_ID = cs.course_ID
   JOIN Student s ON s.student_ID = e.student_ID WHERE c.course_Type <> s.student_Type
@@ -80,6 +97,11 @@ UNION ALL SELECT 'Room without its Lecture/Lab/Office row', COUNT(*)
   FROM Room r WHERE (r.room_Type = 'Lecture' AND r.room_ID NOT IN (SELECT lecture_ID FROM Lecture))
      OR (r.room_Type = 'Lab' AND r.room_ID NOT IN (SELECT lab_ID FROM Lab))
      OR (r.room_Type = 'Office' AND r.room_ID NOT IN (SELECT office_ID FROM Office))
+UNION ALL SELECT 'Lab meeting overlaps its own lecture', COUNT(DISTINCT crn_a)
+  FROM clash WHERE crn_a = crn_b
+UNION ALL SELECT 'Lab has fewer work stations than the section''s seats', COUNT(*)
+  FROM Course_Section_Lab l JOIN Course_Section cs ON cs.CRN = l.CRN JOIN Lab lb ON lb.lab_ID = l.lab_ID
+  WHERE lb.work_Stations < cs.max_Seats
 UNION ALL SELECT 'Course section scheduled in an office', COUNT(*)
   FROM Course_Section cs JOIN Room r ON r.room_ID = cs.room_ID WHERE r.room_Type = 'Office'
 UNION ALL SELECT 'Faculty without a matching Full_Time/Part_Time row', COUNT(*)
