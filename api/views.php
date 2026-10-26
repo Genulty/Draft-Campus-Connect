@@ -111,7 +111,6 @@ function viewOverview(array $u, array $q): array
     $s = one('SELECT s.student_Year, s.student_Type,
         COALESCE(ug.undergraduate_Student_Type, g.graduate_Student_Type) AS load_type,
         COALESCE(ft.credits_Earned, pt.credits_Earned, fg.credits_Earned, pg.credits_Earned) AS credits,
-        COALESCE(ft.status, pt.status) AS status,
         (SELECT GROUP_CONCAT(m.major_Name SEPARATOR \', \') FROM Student_Major sm JOIN Major m ON m.major_ID = sm.major_ID WHERE sm.student_ID = s.student_ID) AS majors,
         (SELECT GROUP_CONCAT(m.minor_Name SEPARATOR \', \') FROM Student_Minor sm JOIN Minor m ON m.minor_ID = sm.minor_ID WHERE sm.student_ID = s.student_ID) AS minors
       FROM Student s
@@ -132,7 +131,7 @@ function viewOverview(array $u, array $q): array
     $holds = one('SELECT COUNT(*) AS n FROM Student_Hold WHERE student_ID = ?', [$u['id']]);
     return [
         'title' => "Welcome, {$u['name']}",
-        'subtitle' => "{$s['student_Type']} · {$s['student_Year']} · {$s['load_type']}" . ($s['status'] ? " · {$s['status']}" : ''),
+        'subtitle' => "{$s['student_Type']} · {$s['student_Year']} · {$s['load_type']} · " . ($holds['n'] ? 'Hold' : 'No hold'),
         'blocks' => [
             stats([['Major', $s['majors']], ['Minor', $s['minors'] ?: 'None'], ['GPA', $gpa['gpa']], ['Credits earned', $s['credits']],
                 ["{$cur['name']} classes", "{$now['n']} ({$now['credits']} credits)"], ['Active holds', $holds['n']]]),
