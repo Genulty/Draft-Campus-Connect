@@ -14,6 +14,18 @@ const CLASH = "EXISTS (SELECT 1 FROM Time_Slot_Day d1 JOIN Time_Slot_Day d2 ON d
     JOIN Time_Slot_Period p2 ON p2.time_Slot_ID = d2.time_Slot_ID AND p2.period_ID = p1.period_ID
   WHERE d1.time_Slot_ID = cs.time_Slot_ID AND d2.time_Slot_ID = ?)";
 
+// Same clash test as CLASH, but against any one of several time slots at once (used to check
+// a section's lecture AND its Course_Section_Lab lab meeting, when it has one, in one query).
+// $column is a trusted SQL fragment (a column/alias name), never user input.
+function clashAgainstAny(string $column, int $count): string
+{
+    $marks = implode(', ', array_fill(0, $count, '?'));
+    return "EXISTS (SELECT 1 FROM Time_Slot_Day d1 JOIN Time_Slot_Day d2 ON d2.day_ID = d1.day_ID
+        JOIN Time_Slot_Period p1 ON p1.time_Slot_ID = d1.time_Slot_ID
+        JOIN Time_Slot_Period p2 ON p2.time_Slot_ID = d2.time_Slot_ID AND p2.period_ID = p1.period_ID
+      WHERE d1.time_Slot_ID = $column AND d2.time_Slot_ID IN ($marks))";
+}
+
 // ---------- Student: add a course section (S-R22, UC-24/25) ----------
 // Throws a RuleError naming the broken rule, or returns the section label if the student may add it.
 // $lock locks the section row so two students can't take the last seat at the same time.
@@ -67,8 +79,20 @@ function checkAdd(int $studentId, int $crn, bool $lock): string
     if ($after > $max) {
         fail("This would bring you to $after credits; the limit for " . strtolower($stu['load_type']) . " students is $max.");
     }
-    $clash = one('SELECT cs.course_ID, cs.CRN FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN
-      WHERE e.student_ID = ? AND cs.semester_ID = ? AND ' . CLASH, [$studentId, $sec['semester_ID'], $sec['time_Slot_ID']]);
+    // Every time slot this section would occupy: its lecture, plus its lab's time slot
+    // when it has a separate Course_Section_Lab meeting (the four-credit Biology sections).
+    $newSlots = [(int) $sec['time_Slot_ID']];
+    $newLab = one('SELECT time_Slot_ID FROM Course_Section_Lab WHERE CRN = ?', [$crn]);
+    if ($newLab) $newSlots[] = (int) $newLab['time_Slot_ID'];
+
+    // Clashes against anything already on the student's schedule: check the new section's
+    // lecture/lab slots against each existing section's lecture AND its lab, if it has one.
+    $lectureClash = clashAgainstAny('cs.time_Slot_ID', count($newSlots));
+    $labClash = clashAgainstAny('ecl.time_Slot_ID', count($newSlots));
+    $clash = one("SELECT cs.course_ID, cs.CRN FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN
+        LEFT JOIN Course_Section_Lab ecl ON ecl.CRN = cs.CRN
+      WHERE e.student_ID = ? AND cs.semester_ID = ? AND ($lectureClash OR $labClash)",
+        [$studentId, $sec['semester_ID'], ...$newSlots, ...$newSlots]);
     if ($clash) fail("$label meets at the same time as {$clash['course_ID']} (CRN {$clash['CRN']}).");
     return $label;
 }
