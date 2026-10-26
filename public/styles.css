@@ -134,3 +134,11 @@ button.ghost:hover { background: rgba(255,255,255,.08); }
   .w-top .brand > span:last-child { font-size: .95rem; }
 }
 
+
+/* ---------- Campus mail ---------- */
+.mail-list { display: flex; flex-direction: column; gap: 10px; }
+.mail-item { background: #fff; border: 1px solid #e3e7ef; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+.mail-item.unread { border-left: 4px solid #2b5aa6; }
+.mail-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.mail-body { margin-top: 8px; font-size: .9rem; color: #16213a; line-height: 1.5; overflow-wrap: anywhere; }
+.mail-body a { color: #2b5aa6; font-weight: 600; }

@@ -670,11 +670,60 @@ function viewAccount(array $me, array $q): array
             ['name' => 'state', 'label' => 'State (2 letters)', 'value' => $u['state'] ?? ''],
             ['name' => 'zip_Code', 'label' => 'ZIP code', 'value' => $u['zip_Code'] ?? ''],
         ]],
-        ['type' => 'form', 'title' => 'Change password', 'endpoint' => 'change-password', 'submit' => 'Change password', 'fields' => [
-            ['name' => 'current', 'label' => 'Current password', 'type' => 'password', 'value' => ''],
+        ...passwordChangeBlocks($me['id']),
+    ]];
+}
+
+// Changing your own password takes three steps: current password, then the emailed code, then the new
+// password. Which step shows depends on what this browser has done so far (kept in the session).
+function passwordChangeBlocks(int $userId): array
+{
+    $pending = one('SELECT reset_ID FROM Password_Reset WHERE user_ID = ? AND purpose = \'Change\' AND used_At IS NULL
+      AND expires_At > NOW() ORDER BY reset_ID DESC LIMIT 1', [$userId]);
+    $mine = ($_SESSION['reset_user'] ?? null) === $userId;
+    $request = ['type' => 'form', 'title' => $pending && $mine ? 'Send a new code' : 'Change password', 'endpoint' => 'request-password-change',
+        'submit' => 'Email me a code', 'fields' => [['name' => 'current', 'label' => 'Current password', 'type' => 'password', 'value' => '']],
+        'note' => 'We email a 6-digit code to your campus inbox (see Inbox). It works for 15 minutes.'];
+    if ($pending && $mine && ($_SESSION['reset_verified'] ?? null) === (int) $pending['reset_ID']) {
+        return [['type' => 'form', 'title' => 'Choose a new password', 'endpoint' => 'complete-password-change', 'submit' => 'Save new password', 'fields' => [
             ['name' => 'password', 'label' => 'New password', 'type' => 'password', 'value' => ''],
             ['name' => 'confirm', 'label' => 'Confirm new password', 'type' => 'password', 'value' => ''],
-        ], 'note' => 'At least 8 characters, with a letter and a number.'],
+        ], 'note' => 'At least 8 characters, with a letter and a number.']];
+    }
+    if ($pending && $mine) {
+        return [['type' => 'form', 'title' => 'Enter your code', 'endpoint' => 'verify-password-code', 'submit' => 'Check code', 'fields' => [
+            ['name' => 'code', 'label' => '6-digit code from your Inbox', 'value' => '', 'placeholder' => '123456'],
+        ], 'note' => 'Open Inbox in the menu to find the email "Your Campus Connect verification code".'], $request];
+    }
+    return [$request];
+}
+
+// Campus mail: every email the system sent this user (newest first). Opening it marks them read.
+function viewInbox(array $u, array $q): array
+{
+    $messages = inbox($u['id']);
+    run('UPDATE Email_Message SET read_At = NOW() WHERE user_ID = ? AND read_At IS NULL', [$u['id']]);
+    return ['title' => 'Inbox', 'subtitle' => "Campus mail for {$u['email']}. In this project, emails are kept here instead of being delivered.",
+        'blocks' => [['type' => 'mail', 'messages' => $messages]]];
+}
+
+// Admin: send a user a password-reset email (A-R6). The admin never sees or sets the new password.
+function viewResetPassword(array $u, array $q): array
+{
+    $level = one('SELECT security_Level FROM Admin WHERE admin_ID = ?', [$u['id']])['security_Level'];
+    return ['title' => 'Reset a password', 'subtitle' => $level === 'Read-Write'
+            ? 'The user gets an email with a code and a link, and chooses the new password themselves.'
+            : 'You are a Read-Only admin, so sending a reset will be refused.', 'blocks' => [
+        ['type' => 'form', 'title' => 'Send a password reset', 'endpoint' => 'send-password-reset', 'submit' => 'Send reset email', 'fields' => [
+            ['name' => 'login', 'label' => 'User email or ID', 'value' => '', 'placeholder' => 'student@campus.edu or 100001'],
+        ], 'note' => 'The code and link work for 15 minutes. The reset is recorded in the audit log.'],
+        table('Recent password resets', "SELECT CONCAT(u.first_Name, ' ', u.last_Name, ' (', r.user_ID, ')') AS User,
+            CASE r.purpose WHEN 'Forgot' THEN 'Forgot password' WHEN 'Change' THEN 'Changed own password' ELSE 'Sent by admin' END AS Reason,
+            COALESCE(CONCAT(au.first_Name, ' ', au.last_Name), '—') AS `Sent by`,
+            DATE_FORMAT(r.created_At, '%b %e, %Y %l:%i %p') AS Sent,
+            CASE WHEN r.used_At IS NOT NULL THEN 'Password changed' WHEN r.expires_At <= NOW() THEN 'Expired' ELSE 'Waiting for the user' END AS Status
+          FROM Password_Reset r JOIN User u ON u.user_ID = r.user_ID LEFT JOIN User au ON au.user_ID = r.requested_By
+          ORDER BY r.reset_ID DESC LIMIT 15"),
     ]];
 }
 
@@ -743,6 +792,7 @@ const VIEWS = [
     'advisees' => ['Advisees', ['Faculty'], 'viewAdvisees'],
     'admin-overview' => ['Overview', ['Admin'], 'viewAdminOverview'],
     'create-user' => ['Create user', ['Admin'], 'viewCreateUser'],
+    'reset-password' => ['Reset a password', ['Admin'], 'viewResetPassword'],
     'create-section' => ['Create section', ['Admin'], 'viewCreateSection'],
     'holds' => ['Student holds', ['Admin'], 'viewHolds'],
     'audit' => ['Audit log', ['Admin'], 'viewAudit'],
@@ -752,6 +802,7 @@ const VIEWS = [
     'catalog' => ['Course catalog', ['Student', 'Faculty', 'Admin', 'StatDept'], 'viewCatalog'],
     'programs' => ['Majors & minors', ['Student', 'Faculty', 'Admin', 'StatDept'], 'viewPrograms'],
     'prereq-search' => ['Prerequisite search', ['Student', 'Faculty', 'Admin', 'StatDept'], 'viewPrereqSearch'],
+    'inbox' => ['Inbox', ['Student', 'Faculty', 'Admin', 'StatDept'], 'viewInbox'],
     'account' => ['My account', ['Student', 'Faculty', 'Admin', 'StatDept'], 'viewAccount'],
 ];
 

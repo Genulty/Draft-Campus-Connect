@@ -1,12 +1,12 @@
 <?php
-// A student's own account (address, password) and academic programs (majors and minors).
+// A user's own address, and a student's academic programs (majors and minors).
 declare(strict_types=1);
 
 const MAX_MAJORS = 2;        // S-F20
 const MAX_MINORS = 1;
 const MAX_ADVISORS = 2;      // S-R11, A-F12
 
-// ---------- Account: address (S-R20) and password (S-R21) ----------
+// ---------- Account: address (S-R20). The password (S-R21) is changed with an emailed code (mail.php). ----------
 
 // Checks an optional address. Returns [street, city, state, zip], each null when left empty.
 function cleanAddress(array $form): array
@@ -28,17 +28,6 @@ function updateAddress(int $userId, array $form): array
     [$street, $city, $state, $zip] = cleanAddress($form);
     run('UPDATE User SET street = ?, city = ?, state = ?, zip_Code = ? WHERE user_ID = ?', [$street, $city, $state, $zip, $userId]);
     return ['message' => 'Your address was updated.'];
-}
-
-function changePassword(int $userId, array $form): array
-{
-    $login = one('SELECT user_Password FROM Login WHERE user_ID = ?', [$userId]);
-    if (!password_verify((string) ($form['current'] ?? ''), $login['user_Password'])) fail('Your current password is not correct.');
-    checkPassword($form['password'] ?? null, $form['confirm'] ?? null);
-    if (password_verify((string) $form['password'], $login['user_Password'])) fail('The new password must be different from your current one.');
-    run('UPDATE Login SET user_Password = ?, no_Of_Tries = 0 WHERE user_ID = ?',
-        [password_hash((string) $form['password'], PASSWORD_DEFAULT), $userId]);
-    return ['message' => 'Your password was changed. Use the new one the next time you sign in.'];
 }
 
 // ---------- Programs: majors (S-R24 to S-R27) and minors (S-R28 to S-R30) ----------

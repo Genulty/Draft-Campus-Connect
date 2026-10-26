@@ -61,10 +61,20 @@ New accounts are created by an admin, not on the sign-in page (A-R5, Admin UC-3)
 4. Refusal (A-F2): sign in as the Read-Only admin **brian.jones@campus.edu** and try the same; it is refused.
 5. Sign out and sign in as the new student with the email or ID and the starting password.
 
-## 7. Password reset after 3 failed sign-ins
-1. Enter a wrong password **3 times**: a *Forgot your password? Reset it* link appears (S-R2).
-2. Verify with the user ID and date of birth (S-F2) and choose a new password. Failed attempts go back to 0
-   and a locked account is unlocked. Sign in with the new password.
+## 7. Password reset by emailed code
+Campus emails are not real mailboxes, so the system keeps every email it sends in `Email_Message` and shows it on
+the **Inbox** page (signed in), or on **Campus mail (demo)** on the sign-in page (signed out, opened with the user ID
+and date of birth). Each reset email has a 6-digit code and a link; both expire after 15 minutes, work once, and the
+code allows 5 wrong tries. Only hashes are stored (`Password_Reset`).
+- **Forgot password (S-R2, S-F2):** enter a wrong password **3 times**, click *Forgot your password? Reset it*, then
+  **Email me a code**. Click *Open campus mail (demo)* to read the email, go back, enter the code, and choose a new
+  password. A wrong code is refused ("4 tries left"). The account is unlocked and a "password was changed" email arrives.
+- **Change your own password (S-R21):** signed in, open **My account**, enter the current password and click
+  **Email me a code**. Read the code in **Inbox**, enter it on My account, then choose the new password.
+- **Admin sends a reset (A-R6):** sign in as **admin@campus.edu**, open **Reset a password**, enter a user's email or ID
+  and click **Send reset email**. The user follows the emailed link (or enters the code via *Got a code by email?* on the
+  sign-in page) and chooses the new password; the admin never sees it. The reset is in the **Audit log**. A Read-Only
+  admin (**brian.jones@campus.edu**) is refused (A-F2).
 
 ## 8. Every student use case
 Signed in as **student@campus.edu**, each of the manual's 41 student use cases is on one of these pages.
@@ -73,7 +83,7 @@ The *Unsuccessful* cases show a red *Not allowed* message with the reason, and n
 | Use case | Page | How to show it |
 |---|---|---|
 | 1–2 Successful / unsuccessful login | Sign-in page | Correct password, then a wrong one |
-| 3–4 Successful / unsuccessful password reset | Sign-in page | Step 7 above; a wrong date of birth is refused |
+| 3–4 Successful / unsuccessful password reset | Sign-in page | Step 7 above; a wrong or expired code is refused |
 | 5 View own dashboard | Overview | Opens after sign-in |
 | 6–7 Current / next-semester schedule | My schedule | Fall 2026 and Spring 2027 tables |
 | 8 View holds | Holds & advisors | *Active holds* |
@@ -89,7 +99,7 @@ The *Unsuccessful* cases show a red *Not allowed* message with the reason, and n
 | 20 Successful prerequisite search | Prerequisite search | Search **CS455** or **Calculus** |
 | 21 Unsuccessful prerequisite search | Prerequisite search | Search **CS999** (no such course) or **CS110** (no prerequisites) |
 | 22 Update address | My account | *Update address*; a state like "New York" is refused |
-| 23 Update password | My account | *Change password*; a wrong current password is refused |
+| 23 Update password | My account + Inbox | Step 7 above; a wrong current password or code is refused |
 | 24–27 Add / drop a section | Register | Step 3 above |
 | 28, 32 Add a (second) major | My majors & minors | *Add a major* → B.S. in Mathematics; a new advisor is assigned |
 | 29, 33 Unsuccessful add major | My majors & minors | A graduate major (M.S.), one already declared, or a 3rd major |

@@ -84,6 +84,7 @@ function renderBlock(block, viewId, onFilter = (params) => openView(viewId, para
     return grid;
   }
   if (block.type === 'message') return renderFlash(block);
+  if (block.type === 'mail') return renderMail(block.messages);
   if (block.type === 'filters') {
     const bar = el('div', 'filters');
     for (const f of block.filters) {
@@ -273,7 +274,7 @@ document.getElementById('logout').addEventListener('click', async () => {
 });
 
 // ---------- Switching between sign in and password reset ----------
-const authViews = ['login-view', 'reset-view'];
+const authViews = ['login-view', 'reset-view', 'code-view', 'newpass-view', 'mail-view'];
 function showAuthView(id) {
   for (const v of authViews) document.getElementById(v).hidden = v !== id;
 }
@@ -286,39 +287,140 @@ function showBox(target, kind, text) {
   target.replaceChildren(el('div', kind, text));
 }
 
-// ---------- Password reset ----------
+// ---------- Password reset: email a code, enter it (or open the emailed link), choose a new password ----------
+async function postJson(url, body) {
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  return [res.ok, await res.json()];
+}
+// Runs a form's request with its button disabled; shows an error in box, or calls done(data).
+function onSubmit(formEl, box, send, done) {
+  formEl.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const button = formEl.querySelector('button[type=submit]');
+    button.disabled = true;
+    box.replaceChildren();
+    try {
+      const [ok, data] = await send(Object.fromEntries(new FormData(formEl)));
+      if (!ok) return showBox(box, 'error', data.error);
+      await done(data);
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+
 const resetForm = document.getElementById('reset-form');
+const codeForm = document.getElementById('code-form');
+const newpassForm = document.getElementById('newpass-form');
+const mailForm = document.getElementById('mail-form');
+let resetLogin = '';
 function openReset(login) {
   resetForm.reset();
   document.getElementById('reset-message').replaceChildren();
   resetForm.login.value = login;
   showAuthView('reset-view');
-  resetForm.user_ID.focus();
+  resetForm.login.focus();
 }
-resetForm.addEventListener('submit', async (e) => {
+function showCodeStep(sentMessage) {
+  codeForm.reset();
+  codeForm.login.value = resetLogin;
+  document.getElementById('code-sent').textContent = `${sentMessage} It works for 15 minutes.`;
+  document.getElementById('code-message').replaceChildren();
+  showAuthView('code-view');
+  (resetLogin ? codeForm.code : codeForm.login).focus();
+}
+document.getElementById('have-code').addEventListener('click', (e) => {
   e.preventDefault();
-  const button = resetForm.querySelector('button[type=submit]');
-  button.disabled = true;
-  const msg = document.getElementById('reset-message');
-  try {
-    const res = await fetch('/api/reset-password', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(Object.fromEntries(new FormData(resetForm))),
-    });
-    const data = await res.json();
-    if (!res.ok) return showBox(msg, 'error', data.error);
-    const login = resetForm.login.value;
-    showAuthView('login-view');
-    form.reset();
-    setLoginRole(form.role.dataset.chosen);
-    form.email.value = login;
-    message.replaceChildren(el('div', 'notice', data.message));
-    form.password.focus();
-  } finally {
-    button.disabled = false;
-  }
+  resetLogin = form.email.value;
+  showCodeStep('Enter the 6-digit code from your password-reset email.');
 });
+function showNewPasswordStep(note) {
+  newpassForm.reset();
+  document.getElementById('newpass-for').textContent = note;
+  document.getElementById('newpass-message').replaceChildren();
+  showAuthView('newpass-view');
+  newpassForm.password.focus();
+}
+
+onSubmit(resetForm, document.getElementById('reset-message'), (body) => postJson('/api/reset/request', body), (data) => {
+  resetLogin = resetForm.login.value;
+  showCodeStep(data.message);
+});
+document.getElementById('resend-code').addEventListener('click', async (e) => {
+  e.preventDefault();
+  const [ok, data] = await postJson('/api/reset/request', { login: resetLogin });
+  if (!ok) return showBox(document.getElementById('code-message'), 'error', data.error);
+  showCodeStep(`A new code was sent. ${data.message}`);
+});
+onSubmit(codeForm, document.getElementById('code-message'), (body) => postJson('/api/reset/verify', body), () => {
+  resetLogin = codeForm.login.value;
+  showNewPasswordStep('Code accepted. At least 8 characters, with a letter and a number.');
+});
+onSubmit(newpassForm, document.getElementById('newpass-message'), (body) => postJson('/api/reset/complete', body), (data) => {
+  showAuthView('login-view');
+  form.reset();
+  setLoginRole(form.role.dataset.chosen);
+  form.email.value = resetLogin;
+  message.replaceChildren(el('div', 'notice', data.message));
+  history.replaceState(null, '', '#login');
+  form.password.focus();
+});
+
+// Campus mail (demo) for signed-out users
+document.getElementById('open-mail').addEventListener('click', (e) => {
+  e.preventDefault();
+  mailForm.reset();
+  document.getElementById('mail-message').replaceChildren();
+  document.getElementById('mail-list').replaceChildren();
+  showAuthView('mail-view');
+  mailForm.user_ID.focus();
+});
+onSubmit(mailForm, document.getElementById('mail-message'), (body) => postJson('/api/demo-mail', body), (data) => {
+  document.getElementById('mail-list').replaceChildren(renderMail(data.messages));
+});
+
+// The emailed link (#reset?token=...) skips the code and goes straight to choosing a new password.
+async function openResetLink(token) {
+  dashboardPage.hidden = true;
+  welcomePage.hidden = true;
+  loginPage.hidden = false;
+  const [ok, data] = await postJson('/api/reset/verify', { token });
+  if (!ok) {
+    showAuthView('reset-view');
+    showBox(document.getElementById('reset-message'), 'error', data.error);
+    return;
+  }
+  resetLogin = data.email;
+  showNewPasswordStep(`For ${data.email}. At least 8 characters, with a letter and a number.`);
+}
+window.addEventListener('hashchange', () => {
+  const token = new URLSearchParams(location.hash.split('?')[1] || '').get('token');
+  if (location.hash.startsWith('#reset?') && token) openResetLink(token);
+});
+
+// Emails, newest first. A reset link in the text becomes clickable.
+function renderMail(messages) {
+  const list = el('div', 'mail-list');
+  if (!messages.length) list.append(el('p', 'muted', 'No email yet.'));
+  for (const m of messages) {
+    const card = el('article', m.unread ? 'mail-item unread' : 'mail-item');
+    const head = el('div', 'mail-head');
+    head.append(el('strong', null, m.subject), el('span', 'muted small', m.sent));
+    const body = el('div', 'mail-body');
+    for (const line of m.body.split('\n')) {
+      if (line.startsWith('/#reset?token=')) {
+        const a = el('a', null, `${location.origin}${line}`);
+        a.href = line;
+        body.append(a, document.createElement('br'));
+      } else {
+        body.append(line, document.createElement('br'));
+      }
+    }
+    card.append(head, el('span', 'muted small', `From: Campus Connect · To: ${m.to}`), body);
+    list.append(card);
+  }
+  return list;
+}
 
 // ---------- Welcome page ----------
 function showWelcome() {
@@ -375,6 +477,8 @@ async function loadPublicSchedule(params = {}) {
 
 // On first load: signed in → dashboard; #login → the sign-in form; otherwise the welcome page.
 fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then((d) => {
+  const token = new URLSearchParams(location.hash.split('?')[1] || '').get('token');
+  if (location.hash.startsWith('#reset?') && token) return openResetLink(token);
   if (d) return showDashboard(d.user);
   const hash = location.hash.slice(1);
   const link = document.querySelector(`.w-cta [data-go="${hash}"]`);

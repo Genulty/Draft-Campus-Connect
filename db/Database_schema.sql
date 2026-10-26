@@ -459,6 +459,37 @@ CREATE TABLE Audit_Log (
   FOREIGN KEY (user_ID)  REFERENCES User(user_ID)
 );
 
+-- ---------- Campus mail and password resets ----------
+-- Emails the system sends. Users' @campus.edu addresses are not real mailboxes, so mail is stored here
+-- and read on the site's Inbox page (or the sign-in page's demo mail screen) instead of being delivered.
+CREATE TABLE Email_Message (
+  message_ID INT          PRIMARY KEY AUTO_INCREMENT,
+  user_ID    INT          NOT NULL,
+  to_Email   VARCHAR(100) NOT NULL,
+  subject    VARCHAR(150) NOT NULL,
+  body       TEXT         NOT NULL,
+  sent_At    DATETIME     NOT NULL,
+  read_At    DATETIME,
+  FOREIGN KEY (user_ID) REFERENCES User(user_ID) ON DELETE CASCADE
+);
+
+-- A password-reset request: a 6-digit code and a link token are emailed to the user, and only
+-- their hashes are stored. Requested by the user (Forgot / Change) or by an admin (Admin).
+CREATE TABLE Password_Reset (
+  reset_ID     INT       PRIMARY KEY AUTO_INCREMENT,
+  user_ID      INT       NOT NULL,
+  purpose      ENUM('Forgot','Change','Admin') NOT NULL,
+  requested_By INT,
+  code_Hash    VARCHAR(255) NOT NULL,
+  token_Hash   CHAR(64)  NOT NULL UNIQUE,
+  attempts     INT       NOT NULL DEFAULT 0,
+  created_At   DATETIME  NOT NULL,
+  expires_At   DATETIME  NOT NULL,
+  used_At      DATETIME,
+  FOREIGN KEY (user_ID)      REFERENCES User(user_ID) ON DELETE CASCADE,
+  FOREIGN KEY (requested_By) REFERENCES Admin(admin_ID)
+);
+
 -- ---------- Triggers ----------
 -- Keeps Course_Section.available_Seats correct without the app having to maintain it, and
 -- keeps the denormalized course_ID columns above in sync with the CRN they were entered with,

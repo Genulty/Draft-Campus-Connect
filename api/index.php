@@ -16,6 +16,7 @@ require __DIR__ . '/db.php';
 require __DIR__ . '/actions.php';
 require __DIR__ . '/accounts.php';
 require __DIR__ . '/student.php';
+require __DIR__ . '/mail.php';
 require __DIR__ . '/views.php';
 
 function respond(int $status, array $body): never
@@ -74,8 +75,19 @@ switch (true) {
     case $method === 'GET' && $path === '/api/master-schedule':
         respond(200, ['blocks' => masterSchedule($_GET)]);
 
-    case $method === 'POST' && $path === '/api/reset-password':
-        respond(200, resetPassword($body));
+    // Forgot password: email a code, check the code (or the emailed link), then choose a new password.
+    case $method === 'POST' && $path === '/api/reset/request':
+        respond(200, requestForgotReset($body));
+
+    case $method === 'POST' && $path === '/api/reset/verify':
+        respond(200, isset($body['token']) ? verifyResetLink($body) : verifyForgotCode($body));
+
+    case $method === 'POST' && $path === '/api/reset/complete':
+        respond(200, finishReset($body));
+
+    // Campus mail for signed-out users (opened with ID + date of birth): this is a demo, mail is not really sent.
+    case $method === 'POST' && $path === '/api/demo-mail':
+        respond(200, demoMail($body));
 
     // Dashboard pages for the signed-in user's role
     case $method === 'GET' && $path === '/api/views':
@@ -94,8 +106,9 @@ switch (true) {
             'add-section' => ['Student'], 'drop-section' => ['Student'],
             'add-major' => ['Student'], 'change-major' => ['Student'], 'drop-major' => ['Student'],
             'add-minor' => ['Student'], 'change-minor' => ['Student'], 'drop-minor' => ['Student'],
-            'update-address' => $everyone, 'change-password' => $everyone,
-            'create-section' => ['Admin'], 'create-user' => ['Admin'],
+            'update-address' => $everyone, 'request-password-change' => $everyone,
+            'verify-password-code' => $everyone, 'complete-password-change' => $everyone,
+            'create-section' => ['Admin'], 'create-user' => ['Admin'], 'send-password-reset' => ['Admin'],
         ];
         if (!in_array($user['role'], $allowed[$m[1]] ?? [], true)) respond(403, ['error' => 'Your role cannot do that.']);
         respond(200, match ($m[1]) {
@@ -108,9 +121,12 @@ switch (true) {
             'change-minor' => changeMinor($user['id'], $body),
             'drop-minor' => dropMinor($user['id'], $body),
             'update-address' => updateAddress($user['id'], $body),
-            'change-password' => changePassword($user['id'], $body),
+            'request-password-change' => requestPasswordChange($user['id'], $body),
+            'verify-password-code' => verifyPasswordChangeCode($user['id'], $body),
+            'complete-password-change' => finishReset($body, $user['id']),
             'create-section' => createSection($user['id'], $body),
             'create-user' => createUser($user['id'], $body),
+            'send-password-reset' => adminSendReset($user['id'], $body),
         });
 
     default:

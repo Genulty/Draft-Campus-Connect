@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4">
+  <link rel="stylesheet" href="styles.css?v=5">
 </head>
 <body>
   <!-- Welcome page (shown to visitors who are not signed in) -->
@@ -64,7 +64,8 @@
           <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
           <button type="submit" class="primary">Sign in</button>
         </form>
-        <p class="muted small">Accounts lock after 5 failed attempts. After 3, you can reset your password.</p>
+        <p class="muted small">Accounts lock after 5 failed attempts. After 3, you can reset your password.
+          Got a code by email? <a href="#" id="have-code">Enter it here</a>.</p>
         <p class="muted small">New to campus? Your account is created by the registrar's office.</p>
         <div class="demo small">
           <b>Test accounts</b> <span class="muted">— password <code>Campus123!</code></span>
@@ -77,19 +78,55 @@
         </div>
       </div>
 
-      <!-- Password reset -->
+      <!-- Password reset, step 1: email a code -->
       <div class="card" id="reset-view" hidden>
-        <div><h2>Reset your password</h2><p class="muted">Confirm it is you with your ID and date of birth.</p></div>
+        <div><h2>Reset your password</h2><p class="muted">We will email a 6-digit code to your campus inbox.</p></div>
         <div id="reset-message"></div>
         <form id="reset-form">
           <label>Email or ID<input name="login" type="text" required></label>
-          <label>Student / user ID<input name="user_ID" inputmode="numeric" required></label>
-          <label>Date of birth<input name="DOB" type="date" required></label>
-          <label>New password<input name="password" type="password" required minlength="8" autocomplete="new-password"></label>
-          <label>Confirm new password<input name="confirm" type="password" required minlength="8" autocomplete="new-password"></label>
-          <button type="submit" class="primary">Reset password</button>
+          <button type="submit" class="primary">Email me a code</button>
         </form>
         <p class="small"><a href="#" data-show="login-view">Back to sign in</a></p>
+      </div>
+
+      <!-- Step 2: enter the code from the email -->
+      <div class="card" id="code-view" hidden>
+        <div><h2>Enter your code</h2><p class="muted" id="code-sent">We sent a 6-digit code to your campus inbox.</p></div>
+        <div id="code-message"></div>
+        <form id="code-form">
+          <label>Email or ID<input name="login" type="text" required></label>
+          <label>6-digit code<input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required placeholder="123456"></label>
+          <button type="submit" class="primary">Check code</button>
+        </form>
+        <p class="small"><a href="#" id="open-mail">Open campus mail (demo)</a> · <a href="#" id="resend-code">Send a new code</a></p>
+        <p class="small"><a href="#" data-show="login-view">Back to sign in</a></p>
+      </div>
+
+      <!-- Step 3: choose a new password -->
+      <div class="card" id="newpass-view" hidden>
+        <div><h2>Choose a new password</h2><p class="muted" id="newpass-for">At least 8 characters, with a letter and a number.</p></div>
+        <div id="newpass-message"></div>
+        <form id="newpass-form">
+          <label>New password<input name="password" type="password" required minlength="8" autocomplete="new-password"></label>
+          <label>Confirm new password<input name="confirm" type="password" required minlength="8" autocomplete="new-password"></label>
+          <button type="submit" class="primary">Save new password</button>
+        </form>
+        <p class="small"><a href="#" data-show="login-view">Back to sign in</a></p>
+      </div>
+
+      <!-- Campus mail for signed-out users (demo: emails are kept on the site, not delivered) -->
+      <div class="card wide" id="mail-view" hidden>
+        <div><h2>Campus mail (demo)</h2><p class="muted">This project does not deliver real email. Open your campus inbox here with your ID and date of birth.</p></div>
+        <div id="mail-message"></div>
+        <form id="mail-form">
+          <div class="row2">
+            <label>User ID<input name="user_ID" inputmode="numeric" required></label>
+            <label>Date of birth<input name="DOB" type="date" required></label>
+          </div>
+          <button type="submit" class="primary">Open mail</button>
+        </form>
+        <div id="mail-list"></div>
+        <p class="small"><a href="#" data-show="code-view">Back to the code</a></p>
       </div>
 
     </div>
@@ -117,6 +154,6 @@
     </main>
   </div>
 
-  <script src="login.js?v=4"></script>
+  <script src="login.js?v=6"></script>
 </body>
 </html>

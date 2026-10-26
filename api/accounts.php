@@ -1,9 +1,9 @@
 <?php
-// Sign-in, password reset, and creating user accounts (admins only).
+// Sign-in and creating user accounts (admins only). Password resets by emailed code are in mail.php.
 declare(strict_types=1);
 
 const MAX_ATTEMPTS = 5;   // the account locks after 5 failed sign-in attempts
-const RESET_AFTER = 3;    // a password reset is offered after 3 failed sign-in attempts
+const RESET_AFTER = 3;    // a password reset (emailed code) is offered after 3 failed sign-in attempts
 const MAX_ADVISEES = 15;  // F-F9, used when assigning advisors
 const NAME_PATTERN = "/^[A-Za-z][A-Za-z' -]{0,49}$/";
 
@@ -182,10 +182,9 @@ function createUser(int $adminId, array $form): array
     });
 }
 
-// ---------- Reset a password after 3 failed sign-in attempts (S-R2, UC-3) ----------
-// Verification: the account's user ID and date of birth must match (S-F2).
-// Failed verifications are counted in a small file so they survive between requests:
-// after 5 wrong answers, resets for that account are blocked for 15 minutes.
+// Wrong answers on the demo mail screen (ID + date of birth) are counted in a small file so they
+// survive between requests: after 5, that account's mail is blocked for 15 minutes. The emailed
+// password-reset codes themselves are in mail.php.
 function verifyFailures(callable $update): array
 {
     $file = sys_get_temp_dir() . '/campus-connect-reset-failures.json';
@@ -202,26 +201,3 @@ function verifyFailures(callable $update): array
     return $result ?? [];
 }
 
-function resetPassword(array $form): array
-{
-    $name = trim((string) ($form['login'] ?? ''));
-    $login = $name === '' ? null : findLogin($name, ', u.DOB');
-    if (!$login) fail('No account matches that email or ID.');
-    if ($login['no_Of_Tries'] < RESET_AFTER && !$login['lock_Var']) fail('Password reset is available after ' . RESET_AFTER . ' failed sign-in attempts.');
-
-    $key = (string) $login['user_ID'];
-    $blocked = verifyFailures(fn (array $data) => ['blocked' => ($data[$key]['count'] ?? 0) >= 5])['blocked'];
-    if ($blocked) fail('Too many failed verification attempts. Try again in 15 minutes.');
-    if (trim((string) ($form['user_ID'] ?? '')) !== $key || trim((string) ($form['DOB'] ?? '')) !== $login['DOB']) {
-        verifyFailures(function (array &$data) use ($key) {
-            $data[$key] = ['count' => ($data[$key]['count'] ?? 0) + 1, 'until' => time() + 15 * 60];
-        });
-        fail('The ID and date of birth do not match this account.');
-    }
-    checkPassword($form['password'] ?? null, $form['confirm'] ?? null);
-
-    run('UPDATE Login SET user_Password = ?, no_Of_Tries = 0, lock_Var = 0 WHERE user_ID = ?',
-        [password_hash((string) $form['password'], PASSWORD_DEFAULT), $login['user_ID']]);
-    verifyFailures(function (array &$data) use ($key) { unset($data[$key]); });
-    return ['message' => 'Your password was reset and the account is unlocked. You can sign in now.'];
-}
