@@ -134,8 +134,3 @@ button.ghost:hover { background: rgba(255,255,255,.08); }
   .w-top .brand > span:last-child { font-size: .95rem; }
 }
 
-/* ---------- Sign-in page per type of user: each gets its own accent color ---------- */
-#login-page[data-role="Faculty"] .hero { background: linear-gradient(155deg, #1d4d43 0%, #163b33 60%, #0f2b25 100%); }
-#login-page[data-role="Admin"] .hero { background: linear-gradient(155deg, #4a2a63 0%, #3a2150 60%, #2a173b 100%); }
-#login-page[data-role="StatDept"] .hero { background: linear-gradient(155deg, #6a3d1c 0%, #552f15 60%, #3f220f 100%); }
-#login-page .w-kicker { color: #cfe0ff; }

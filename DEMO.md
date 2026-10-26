@@ -2,8 +2,8 @@
 
 Before the demo, reset the data so it starts clean: `sudo bash deploy/reset-db.sh` (on the server).
 Every account's password is `Campus123!`. On the sign-in page, choose the account type in **Sign in as**
-(Student, Faculty, Admin or Stat-Dept member). Each type has its own heading and color, and an account of another
-type is refused ("This is not a Faculty account"). The one-click test-account buttons pick the type for you.
+(Student, Faculty, Admin or Stat-Dept member). An account of another type is refused ("This is not a Faculty
+account"). The one-click test-account buttons pick the type for you.
 
 ## 1. Login → Student
 Sign in as **student@campus.edu** (Julio Larrea). Optionally show a failed login first: a wrong password

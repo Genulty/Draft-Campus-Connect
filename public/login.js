@@ -206,7 +206,7 @@ function showLogin() {
   loginPage.hidden = false;
   showAuthView('login-view');
   form.reset();
-  setLoginRole(loginPage.dataset.role);
+  setLoginRole(form.role.dataset.chosen);
   message.innerHTML = '';
   history.replaceState(null, '', location.pathname);
 }
@@ -253,41 +253,11 @@ document.querySelectorAll('[data-email]').forEach((b) => b.addEventListener('cli
   form.requestSubmit();
 }));
 
-// ---------- One sign-in page per type of user ----------
-const ROLE_PAGES = {
-  Student: {
-    kicker: 'Student portal', title: 'Student sign in', idLabel: 'Student email or ID',
-    heading: 'Your classes, grades and degree in one place.',
-    lead: 'Register for classes, see your schedule, grades and transcript, track your degree audit, and manage your majors and minors.',
-  },
-  Faculty: {
-    kicker: 'Faculty portal', title: 'Faculty sign in', idLabel: 'Faculty email or ID',
-    heading: 'Your teaching and advising in one place.',
-    lead: 'See the sections you teach, your class rosters with attendance, and your advisees.',
-  },
-  Admin: {
-    kicker: 'Administration portal', title: 'Admin sign in', idLabel: 'Admin email or ID',
-    heading: 'Run the registrar\'s office.',
-    lead: 'Create users and course sections, manage student holds, and review the audit log.',
-  },
-  StatDept: {
-    kicker: 'Statistics Department portal', title: 'Stat-Dept sign in', idLabel: 'Stat-Dept email or ID',
-    heading: 'Campus reports, without names.',
-    lead: 'Enrollment counts and grade statistics by semester and department. Aggregate data only.',
-  },
-};
+// ---------- Account type ("Sign in as"), remembered in this browser ----------
 function setLoginRole(role) {
-  const page = ROLE_PAGES[role] ? role : 'Student';
-  const info = ROLE_PAGES[page];
-  form.role.value = page;
-  document.getElementById('role-kicker').textContent = info.kicker;
-  document.getElementById('role-heading').textContent = info.heading;
-  document.getElementById('role-lead').textContent = info.lead;
-  document.getElementById('role-title').textContent = info.title;
-  document.getElementById('role-hint').textContent = 'Use your campus email (or ID) and password.';
-  document.getElementById('role-id-label').textContent = info.idLabel;
-  loginPage.dataset.role = page;
-  try { localStorage.setItem('campus-connect-role', page); } catch { /* the page works without saving the choice */ }
+  form.role.value = ['Student', 'Faculty', 'Admin', 'StatDept'].includes(role) ? role : 'Student';
+  form.role.dataset.chosen = form.role.value;
+  try { localStorage.setItem('campus-connect-role', form.role.value); } catch { /* the page works without saving the choice */ }
 }
 document.getElementById('role-select').addEventListener('change', (e) => {
   setLoginRole(e.target.value);
@@ -341,7 +311,7 @@ resetForm.addEventListener('submit', async (e) => {
     const login = resetForm.login.value;
     showAuthView('login-view');
     form.reset();
-    setLoginRole(loginPage.dataset.role);
+    setLoginRole(form.role.dataset.chosen);
     form.email.value = login;
     message.replaceChildren(el('div', 'notice', data.message));
     form.password.focus();

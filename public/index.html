@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=3">
+  <link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
   <!-- Welcome page (shown to visitors who are not signed in) -->
@@ -39,9 +39,8 @@
     <div class="hero">
       <a href="#" class="brand" data-go="welcome"><span class="logo">🎓</span><span>Harvest Hill University<small>Campus Connect</small></span></a>
       <div>
-        <p class="w-kicker" id="role-kicker">Student portal</p>
-        <h1 id="role-heading">One place for registration, teaching and reporting.</h1>
-        <p class="lead" id="role-lead">Students, faculty, administrators and the Statistics Department each see exactly what their role allows.</p>
+        <h1>One place for registration, teaching and reporting.</h1>
+        <p class="lead">Students, faculty, administrators and the Statistics Department each see exactly what their role allows.</p>
       </div>
       <a href="#" class="back-home" data-go="welcome">← Back to the welcome page</a>
       <div class="foot">CS5910 System Design and Implementation · Julio Larrea, Muiz M. Onifade, Pavel Clarke</div>
@@ -50,7 +49,7 @@
     <div class="panel">
       <!-- Sign-in form -->
       <div class="card" id="login-view">
-        <div><h2 id="role-title">Sign in</h2><p class="muted" id="role-hint">Use your campus email (or ID) and password.</p></div>
+        <div><h2>Sign in</h2><p class="muted">Choose your account type, then use your campus email (or ID) and password.</p></div>
         <div id="message"></div>
         <form id="login-form">
           <label>Sign in as
@@ -61,7 +60,7 @@
               <option value="StatDept">Stat-Dept member</option>
             </select>
           </label>
-          <label><span id="role-id-label">Email or ID</span><input name="email" type="text" autocomplete="username" required autofocus></label>
+          <label>Email or ID<input name="email" type="text" autocomplete="username" required autofocus></label>
           <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
           <button type="submit" class="primary">Sign in</button>
         </form>
@@ -118,6 +117,6 @@
     </main>
   </div>
 
-  <script src="login.js?v=3"></script>
+  <script src="login.js?v=4"></script>
 </body>
 </html>
