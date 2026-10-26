@@ -2792,7 +2792,8 @@ INSERT INTO Day (day_ID, week_Day) VALUES
   ('R', 'Thursday'),
   ('F', 'Friday');
 
--- Period: 7 rows
+-- Period: 10 rows (1-7 are the 80-minute lecture periods; 8-10 are the
+-- 150-minute Friday lab periods for the four-credit Biology sections)
 INSERT INTO Period (period_ID, start_Time, end_Time) VALUES
   (1, '08:00:00', '09:20:00'),
   (2, '09:30:00', '10:50:00'),
@@ -2800,9 +2801,12 @@ INSERT INTO Period (period_ID, start_Time, end_Time) VALUES
   (4, '13:00:00', '14:20:00'),
   (5, '14:30:00', '15:50:00'),
   (6, '16:00:00', '17:20:00'),
-  (7, '18:00:00', '19:20:00');
+  (7, '18:00:00', '19:20:00'),
+  (8, '09:00:00', '11:30:00'),
+  (9, '13:00:00', '15:30:00'),
+  (10, '15:30:00', '18:00:00');
 
--- Time_Slot: 17 rows
+-- Time_Slot: 20 rows (18-20 are the single-day Friday lab slots)
 INSERT INTO Time_Slot (time_Slot_ID) VALUES
   (1),
   (2),
@@ -2820,7 +2824,10 @@ INSERT INTO Time_Slot (time_Slot_ID) VALUES
   (14),
   (15),
   (16),
-  (17);
+  (17),
+  (18),
+  (19),
+  (20);
 
 -- Time_Slot_Day: 31 rows
 INSERT INTO Time_Slot_Day (time_Slot_ID, day_ID) VALUES
@@ -2854,9 +2861,12 @@ INSERT INTO Time_Slot_Day (time_Slot_ID, day_ID) VALUES
   (14, 'R'),
   (15, 'F'),
   (16, 'F'),
-  (17, 'F');
+  (17, 'F'),
+  (18, 'F'),
+  (19, 'F'),
+  (20, 'F');
 
--- Time_Slot_Period: 17 rows
+-- Time_Slot_Period: 20 rows
 INSERT INTO Time_Slot_Period (time_Slot_ID, period_ID) VALUES
   (1, 1),
   (2, 2),
@@ -2874,7 +2884,10 @@ INSERT INTO Time_Slot_Period (time_Slot_ID, period_ID) VALUES
   (14, 7),
   (15, 1),
   (16, 2),
-  (17, 3);
+  (17, 3),
+  (18, 8),
+  (19, 9),
+  (20, 10);
 
 -- Course_Section: 321 rows
 INSERT INTO Course_Section (CRN, course_ID, section_No, faculty_ID, time_Slot_ID, room_ID, semester_ID, max_Seats) VALUES
@@ -3200,6 +3213,15 @@ INSERT INTO Course_Section (CRN, course_ID, section_No, faculty_ID, time_Slot_ID
   (10622, 'ENG115', '002', 200052, 12, 'LIB-101', 'SP27', 10),
   (10623, 'ENG510', '001', 200055, 4, 'CCT-105', 'SP27', 10),
   (10624, 'ENG530', '001', 200055, 2, 'BUS-101', 'SP27', 10);
+
+-- Course_Section_Lab: 6 rows (the FA26 four-credit Biology sections' labs)
+INSERT INTO Course_Section_Lab (CRN, lab_ID, time_Slot_ID) VALUES
+  (10469, 'NSC-105', 19),  -- BIO110-001, F 13:00-15:30
+  (10470, 'NSC-106', 19),  -- BIO115-001, F 13:00-15:30
+  (10471, 'ACB-105', 19),  -- BIO220-001, F 13:00-15:30
+  (10479, 'NSC-105', 18),  -- BIO110-002, F 09:00-11:30
+  (10480, 'NSC-105', 20),  -- BIO115-002, F 15:30-18:00
+  (10481, 'ACB-106', 19);  -- BIO220-002, F 13:00-15:30
 
 -- Enrollment: 2147 rows
 INSERT INTO Enrollment (student_ID, CRN, grade) VALUES
