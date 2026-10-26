@@ -329,14 +329,6 @@ async function loadWelcome() {
     if (!res.ok) return;
     const info = await res.json();
     if (info.current) document.getElementById('w-semester').textContent = `${info.current} semester`;
-    const c = info.counts;
-    const numbers = [['Students', c.students], ['Faculty', c.faculty], ['Courses', c.courses],
-      ['Departments', c.departments], [`Sections this semester`, c.sections]];
-    document.getElementById('w-numbers').replaceChildren(...numbers.map(([label, value]) => {
-      const card = el('div', 'w-number');
-      card.append(el('strong', null, value.toLocaleString()), el('span', null, label));
-      return card;
-    }));
     const reg = document.getElementById('w-registration');
     const r = info.registration;
     if (r && info.next) {
@@ -346,7 +338,7 @@ async function loadWelcome() {
       reg.hidden = false;
     }
   } catch {
-    // The welcome page still works without the numbers.
+    // The welcome page still works without the semester and registration dates.
   }
   loadPublicSchedule();
 }
