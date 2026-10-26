@@ -52,6 +52,7 @@ no registration with an active hold, at most 15 advisees per full-time advisor.
 | Buildings / rooms | 5 / 100 (20 lecture halls, 10 labs, 70 offices) |
 | Courses / prerequisites | 90 / 96 |
 | Semesters | 6 (Fall 2024 – Spring 2027; Fall 2026 is current; Spring 2027 registration opened Oct 1, 2026) |
+| Periods / time slots | 17 / 34 (Fall 2026 uses seven 100-minute periods, Mon/Wed or Tue/Thu; see `database/migrations/2026-10-26-fall-schedule.sql`) |
 | Course sections / lab meetings | 321 / 6 (the Fall 2026 four-credit Biology sections meet in a lab on Friday) |
 | Enrollments / student history | 2,147 / 1,526 |
 | Attendance (Fall 2026 so far) | 6,176 |
