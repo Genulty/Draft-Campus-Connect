@@ -559,15 +559,19 @@ function viewEnrollmentCounts(array $u, array $q): array
 
 // ---------------- Pages shared by several roles ----------------
 
-function viewMasterSchedule(array $u, array $q): array
+// The semester master schedule (filters + every section). Public: the welcome page shows it without signing in.
+function masterSchedule(array $q): array
 {
     [$semester, $deptId, $filters] = semesterFilter($q);
-    return ['title' => 'Semester master schedule', 'blocks' => [
-        $filters,
+    return [$filters,
         table('Course sections', 'SELECT ' . SECTION_COLUMNS . ', ' . LAB_COLUMNS . ', ' . INSTRUCTOR . ', ' . SEATS . '
           FROM Course_Section cs ' . SECTION_JOINS . ' ' . LAB_JOINS . "
-          WHERE cs.semester_ID = ? AND (? = '' OR c.dept_ID = ?) ORDER BY cs.course_ID, cs.section_No", [$semester, $deptId, $deptId]),
-    ]];
+          WHERE cs.semester_ID = ? AND (? = '' OR c.dept_ID = ?) ORDER BY cs.course_ID, cs.section_No", [$semester, $deptId, $deptId])];
+}
+
+function viewMasterSchedule(array $u, array $q): array
+{
+    return ['title' => 'Semester master schedule', 'blocks' => masterSchedule($q)];
 }
 
 function viewCatalog(array $u, array $q): array

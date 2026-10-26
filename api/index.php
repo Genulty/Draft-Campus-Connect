@@ -67,9 +67,12 @@ switch (true) {
     case $method === 'GET' && $path === '/api/me':
         respond(200, ['user' => requireUser($user)]);
 
-    // Welcome page and password reset (public). New accounts are created by an admin (create-user below).
+    // Welcome page (numbers and the master schedule) and password reset (public). New accounts are created by an admin (create-user below).
     case $method === 'GET' && $path === '/api/welcome':
         respond(200, welcomeInfo());
+
+    case $method === 'GET' && $path === '/api/master-schedule':
+        respond(200, ['blocks' => masterSchedule($_GET)]);
 
     case $method === 'POST' && $path === '/api/reset-password':
         respond(200, resetPassword($body));

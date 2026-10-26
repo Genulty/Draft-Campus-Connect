@@ -72,7 +72,8 @@ function el(tag, className, text) {
   return e;
 }
 
-function renderBlock(block, viewId) {
+// onFilter: what a filter change does. By default it reloads the dashboard page with the new values.
+function renderBlock(block, viewId, onFilter = (params) => openView(viewId, params)) {
   if (block.type === 'stats') {
     const grid = el('div', 'stats');
     for (const item of block.items) {
@@ -97,7 +98,7 @@ function renderBlock(block, viewId) {
       }
       select.addEventListener('change', () => {
         const params = Object.fromEntries([...bar.querySelectorAll('select')].map((s) => [s.name, s.value]));
-        openView(viewId, params);
+        onFilter(params);
       });
       label.append(select);
       bar.append(label);
@@ -346,6 +347,20 @@ async function loadWelcome() {
     }
   } catch {
     // The welcome page still works without the numbers.
+  }
+  loadPublicSchedule();
+}
+
+// The public master schedule on the welcome page, with its semester and department filters.
+async function loadPublicSchedule(params = {}) {
+  const box = document.getElementById('w-schedule');
+  try {
+    const res = await fetch(`/api/master-schedule?${new URLSearchParams(params)}`);
+    if (!res.ok) throw new Error();
+    const { blocks } = await res.json();
+    box.replaceChildren(...blocks.map((b) => renderBlock(b, null, loadPublicSchedule)));
+  } catch {
+    box.replaceChildren(el('p', 'muted', 'The schedule could not be loaded. Please try again later.'));
   }
 }
 
