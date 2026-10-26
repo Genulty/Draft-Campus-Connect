@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=2">
+  <link rel="stylesheet" href="styles.css?v=3">
 </head>
 <body>
   <!-- Welcome page (shown to visitors who are not signed in) -->
@@ -39,8 +39,9 @@
     <div class="hero">
       <a href="#" class="brand" data-go="welcome"><span class="logo">🎓</span><span>Harvest Hill University<small>Campus Connect</small></span></a>
       <div>
-        <h1>One place for registration, teaching and reporting.</h1>
-        <p class="lead">Students, faculty, administrators and the Statistics Department each see exactly what their role allows.</p>
+        <p class="w-kicker" id="role-kicker">Student portal</p>
+        <h1 id="role-heading">One place for registration, teaching and reporting.</h1>
+        <p class="lead" id="role-lead">Students, faculty, administrators and the Statistics Department each see exactly what their role allows.</p>
       </div>
       <a href="#" class="back-home" data-go="welcome">← Back to the welcome page</a>
       <div class="foot">CS5910 System Design and Implementation · Julio Larrea, Muiz M. Onifade, Pavel Clarke</div>
@@ -49,10 +50,18 @@
     <div class="panel">
       <!-- Sign-in form -->
       <div class="card" id="login-view">
-        <div><h2>Sign in</h2><p class="muted">Use your campus email (or ID) and password.</p></div>
+        <div><h2 id="role-title">Sign in</h2><p class="muted" id="role-hint">Use your campus email (or ID) and password.</p></div>
         <div id="message"></div>
         <form id="login-form">
-          <label>Email or ID<input name="email" type="text" autocomplete="username" required autofocus></label>
+          <label>Sign in as
+            <select name="role" id="role-select">
+              <option value="Student">Student</option>
+              <option value="Faculty">Faculty</option>
+              <option value="Admin">Admin</option>
+              <option value="StatDept">Stat-Dept member</option>
+            </select>
+          </label>
+          <label><span id="role-id-label">Email or ID</span><input name="email" type="text" autocomplete="username" required autofocus></label>
           <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
           <button type="submit" class="primary">Sign in</button>
         </form>
@@ -61,10 +70,10 @@
         <div class="demo small">
           <b>Test accounts</b> <span class="muted">— password <code>Campus123!</code></span>
           <div class="chips">
-            <button type="button" data-email="student@campus.edu">Student</button>
-            <button type="button" data-email="faculty@campus.edu">Faculty</button>
-            <button type="button" data-email="admin@campus.edu">Admin</button>
-            <button type="button" data-email="stat@campus.edu">Stat-Dept</button>
+            <button type="button" data-email="student@campus.edu" data-role="Student">Student</button>
+            <button type="button" data-email="faculty@campus.edu" data-role="Faculty">Faculty</button>
+            <button type="button" data-email="admin@campus.edu" data-role="Admin">Admin</button>
+            <button type="button" data-email="stat@campus.edu" data-role="StatDept">Stat-Dept</button>
           </div>
         </div>
       </div>
@@ -109,6 +118,6 @@
     </main>
   </div>
 
-  <script src="login.js?v=2"></script>
+  <script src="login.js?v=3"></script>
 </body>
 </html>

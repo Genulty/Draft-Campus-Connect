@@ -47,6 +47,13 @@ function signIn(array $body): array
         ]];
     }
 
+    // Each type of user signs in on its own page: the account must be the type chosen there.
+    $labels = ['Student' => 'Student', 'Faculty' => 'Faculty', 'Admin' => 'Admin', 'StatDept' => 'Stat-Dept member'];
+    $role = (string) ($body['role'] ?? '');
+    if (isset($labels[$role]) && $role !== $login['user_Type']) {
+        return [403, ['error' => "This is not a {$labels[$role]} account. Choose {$labels[$login['user_Type']]} in \"Sign in as\" and try again."]];
+    }
+
     run('UPDATE Login SET no_Of_Tries = 0 WHERE user_ID = ?', [$login['user_ID']]);
     session_regenerate_id(true); // a fresh session ID on every sign-in
     $_SESSION['user'] = userInfo($login['user_ID']);
