@@ -3,7 +3,8 @@
 # Without your own domain it uses <ip-with-dashes>.sslip.io, a free hostname that points to this server.
 #   sudo bash deploy/enable-https.sh                 # e.g. https://3-239-161-185.sslip.io
 #   sudo bash deploy/enable-https.sh mydomain.com    # if you own a domain pointing at this server
-# Port 443 (HTTPS) must be open in the Lightsail firewall first.
+# Port 443 (HTTPS) must be open in the Lightsail firewall first. If the server's IP address changes,
+# run this again to get a certificate for the new address.
 set -euo pipefail
 
 if [ "$(id -u)" -ne 0 ]; then

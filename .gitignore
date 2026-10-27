@@ -1,1 +1,4 @@
 .DS_Store
+# Keep guides, exports and installed packages off GitHub
+*.pdf
+node_modules/

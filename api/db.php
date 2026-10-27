@@ -1,7 +1,8 @@
 <?php
 // MySQL connection (PDO) and small query helpers shared by the whole API.
 // Connection settings come from /etc/campus-connect/config.php on the server
-// (written by deploy/lightsail-setup.sh), then environment variables, then local defaults.
+// (written by deploy/lightsail-setup.sh), then environment variables, then local defaults
+// (user campus, password campus, MySQL on 127.0.0.1) for testing on your own computer.
 declare(strict_types=1);
 
 // A broken rule or bad input. The message is shown to the user (HTTP 422).

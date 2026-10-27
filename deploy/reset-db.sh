@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Drops and reloads the campus_connect database from db/Database_schema.sql and db/Project_data.sql.
 #   sudo bash deploy/reset-db.sh
+# Warning: this erases everything changed on the live site since the last reload (accounts created by
+# admins, registrations, majors and minors, campus mail). To add new tables to a live database without
+# losing data, run the matching script in database/migrations/ instead.
 set -euo pipefail
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 echo "Reloading the database (this takes a few seconds)..."
