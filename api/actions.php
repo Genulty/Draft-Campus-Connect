@@ -40,7 +40,7 @@ function checkAdd(int $studentId, int $crn, bool $lock): string
     if (!$sec) fail('That course section does not exist.');
     $label = "{$sec['course_ID']} {$sec['course_Name']} (CRN {$sec['CRN']})";
 
-    $stu = one("SELECT s.student_Type, COALESCE(u.undergraduate_Student_Type, g.graduate_Student_Type) AS load_type
+    $stu = one("SELECT s.student_Type, s.student_Year, COALESCE(u.undergraduate_Student_Type, g.graduate_Student_Type) AS load_type
       FROM Student s LEFT JOIN Undergraduate_Student u ON u.student_ID = s.student_ID
       LEFT JOIN Graduate_Student g ON g.student_ID = s.student_ID WHERE s.student_ID = ?", [$studentId]);
 
@@ -53,6 +53,16 @@ function checkAdd(int $studentId, int $crn, bool $lock): string
         fail($stu['student_Type'] === 'Undergraduate'
             ? 'Undergraduates cannot register for graduate courses.'
             : 'Graduate students cannot register for undergraduate courses.');
+    }
+    // A course's level (the thousands digit of its number) sets the minimum standing to take it:
+    // 1000-level is open to anyone, 2000 needs Sophomore+, 3000 needs Junior+, 4000 needs Senior+.
+    if ($sec['course_Type'] === 'Undergraduate') {
+        $order = ['Freshman' => 1, 'Sophomore' => 2, 'Junior' => 3, 'Senior' => 4];
+        $level = (int) substr(preg_replace('/\D/', '', $sec['course_ID']), 0, 1);
+        $minYear = [2 => 'Sophomore', 3 => 'Junior', 4 => 'Senior'][$level] ?? null;
+        if ($minYear !== null && ($order[$stu['student_Year']] ?? 0) < $order[$minYear]) {
+            fail("$label is a {$level}000-level course; you need to be at least a $minYear (you're a {$stu['student_Year']}).");
+        }
     }
     $already = one('SELECT cs.CRN FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN
       WHERE e.student_ID = ? AND cs.course_ID = ? AND cs.semester_ID = ?', [$studentId, $sec['course_ID'], $sec['semester_ID']]);
