@@ -74,7 +74,8 @@ switch (true) {
 
     case $method === 'GET' && $path === '/api/master-schedule':
         respond(200, ['blocks' => masterSchedule($_GET)]);
-        case $method === 'GET' && $path === '/api/major-browser':
+
+    case $method === 'GET' && $path === '/api/major-browser':
         respond(200, ['blocks' => publicMajorBrowser($_GET)]);
 
     // Forgot password: email a code, check the code (or the emailed link), then choose a new password.

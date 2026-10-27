@@ -549,15 +549,19 @@ function viewEnrollmentCounts(array $u, array $q): array
     ]];
 }
 
-// Pages shared by several roles
+// ---------------- Pages shared by several roles ----------------
+
+// Public course explorer on the welcome page: pick a semester and a major to see its courses and sections.
 function publicMajorBrowser(array $q): array
 {
-    // Get the available semesters from MySQL.
+    // The current semester and any upcoming ones, from MySQL.
+    $current = currentSemester();
     $semesters = rows(
-       "SELECT semester_ID, semester_Name
-        FROM Semester
-        WHERE semester_ID IN ('FA26', 'SP27')
-        ORDER BY start_Date"
+        'SELECT semester_ID, semester_Name
+         FROM Semester
+         WHERE start_Date >= (SELECT start_Date FROM Semester WHERE semester_ID = ?)
+         ORDER BY start_Date',
+        [$current['id'] ?? '']
     );
 
 
@@ -569,11 +573,10 @@ function publicMajorBrowser(array $q): array
     );
 
     // Use the current semester by default.
-    $semester = $q['semester'] ?? 'FA26';
-
+    $semester = (string) ($q['semester'] ?? '');
     if (!in_array($semester, array_column($semesters, 'semester_ID'), true)) {
-    $semester = 'FA26';
-}
+        $semester = $current['id'];
+    }
 
     // No major selected by default.
     $major = (string) ($q['major'] ?? '');

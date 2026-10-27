@@ -551,11 +551,12 @@ async function loadWelcome() {
   loadPublicSchedule();
 }
 
-// The public master schedule on the welcome page, with its semester and department filters.
+// The public course explorer on the welcome page, with its semester and major filters.
 async function loadPublicSchedule(params = {}) {
-    const box = document.getElementById('w-schedule');
-    try {
-    const res = await fetch(`/api/major-browser?${new URLSearchParams(params)}`);    if (!res.ok) throw new Error();
+  const box = document.getElementById('w-schedule');
+  try {
+    const res = await fetch(`/api/major-browser?${new URLSearchParams(params)}`);
+    if (!res.ok) throw new Error();
     const { blocks } = await res.json();
     box.replaceChildren(...blocks.map((b) => renderBlock(b, null, loadPublicSchedule)));
   } catch {
