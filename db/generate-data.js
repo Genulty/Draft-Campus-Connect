@@ -105,6 +105,7 @@ const BUILDINGS = [['ACB', 'Academic Building'], ['NSC', 'Natural Sciences'], ['
 const BUILDING_USAGE = { ACB: 'Academic', NSC: 'Academic', CCT: 'Student Services', LIB: 'Library', BUS: 'Academic' };
 const freeOffices = [];
 const rooms = [];
+const labRooms = []; // the subset of `rooms` that are actual Lab rows (for Course_Section_Lab)
 // Room is the supertype for every space (Lecture, Lab, or Office); the matching subtype row
 // (Lecture/Lab/Office, FK'd to Room.room_ID) is what carries the capacity attribute.
 for (const [b, name] of BUILDINGS) {
@@ -120,7 +121,7 @@ for (const [b, name] of BUILDINGS) {
     const id = `${b}-${100 + r}`;
     rooms.push(id);
     insert('Room', ['room_ID','building_ID','room_No','room_Type'], [id, b, String(100 + r), lab ? 'Lab' : 'Lecture']);
-    if (lab) insert('Lab', ['lab_ID','work_Stations'], [id, pick([20, 24])]);
+    if (lab) { insert('Lab', ['lab_ID','work_Stations'], [id, pick([20, 24])]); labRooms.push(id); }
     else insert('Lecture', ['lecture_ID','seats'], [id, pick([30, 35, 40])]);
   }
 }
@@ -241,12 +242,23 @@ const DAYS = [['M','Monday'],['T','Tuesday'],['W','Wednesday'],['R','Thursday'],
 for (const d of DAYS) insert('Day', ['day_ID','week_Day'], d);
 const PERIODS = [['08:00:00','09:20:00'],['09:30:00','10:50:00'],['11:00:00','12:20:00'],['13:00:00','14:20:00'],['14:30:00','15:50:00'],['16:00:00','17:20:00'],['18:00:00','19:20:00']];
 PERIODS.forEach(([s, e], i) => insert('Period', ['period_ID','start_Time','end_Time'], [i + 1, s, e]));
-const slots = []; // {id, days, period}
+// Every lecture meets two days a week (MW or TR), 80 minutes a meeting = 160 min/week, which is
+// exactly a 3-credit course's weekly contact time (1 credit = 1 hour/week, rounded up). A single
+// 80-minute Friday meeting would only be half that, so lecture sections never use a single-day
+// slot -- that gap used to produce 3-credit sections with only 80 min/week of real meeting time.
+const slots = []; // {id, days, period} -- lecture slots only, always two days
 for (const days of [['M','W'], ['T','R']]) {
   for (let p = 1; p <= PERIODS.length; p++) slots.push({ id: slots.length + 1, days, period: p });
 }
-for (let p = 1; p <= 3; p++) slots.push({ id: slots.length + 1, days: ['F'], period: p });
-for (const s of slots) {
+// Lab slots: Friday only, one 80-minute meeting per lecture period, kept in their own ID range so
+// a lecture section is never placed into a lab-only slot. A four-credit Biology section (below)
+// gets one of these in addition to its lecture slot: 160 (lecture) + 80 (lab) = 240 min/week = 4
+// credits exactly. Lecture days (M/T/W/R) and lab days (F) never overlap, so exact time_Slot_ID
+// equality is a valid "no real clash" check throughout this file -- no two different IDs here
+// ever represent overlapping real time.
+const labSlots = [];
+for (let p = 1; p <= PERIODS.length; p++) labSlots.push({ id: slots.length + labSlots.length + 1, days: ['F'], period: p });
+for (const s of [...slots, ...labSlots]) {
   insert('Time_Slot', ['time_Slot_ID'], [s.id]);
   for (const d of s.days) insert('Time_Slot_Day', ['time_Slot_ID','day_ID'], [s.id, d]);
   insert('Time_Slot_Period', ['time_Slot_ID','period_ID'], [s.id, s.period]);
@@ -304,6 +316,7 @@ for (const s of students.filter((x) => !x.grad && x.year !== 'Freshman' && x.id 
 // Each department offers 18 sections a semester: exactly its teaching capacity
 // (8 full-time x 2 + 2 part-time x 1). No faculty member or room is double-booked.
 const sections = []; // {crn, course, sectionNo, faculty, slot, room, sem, students: [{id, grade}]}
+const labBySection = new Map(); // crn -> {lab_ID, slot}, for every four-credit Biology section
 let nextCRN = 10001;
 SEMESTERS.forEach((sem, si) => {
   const roomBusy = new Set();
@@ -336,7 +349,22 @@ SEMESTERS.forEach((sem, si) => {
       load.set(placed.f.id, load.get(placed.f.id) + 1);
       busy.add(`${placed.f.id}:${placed.slot.id}`);
       roomBusy.add(`${placed.room}:${placed.slot.id}`);
-      sections.push({ crn: nextCRN++, course: cid, sectionNo, faculty: placed.f.id, slot: placed.slot, room: placed.room, sem: sem.id, students: [] });
+      const crn = nextCRN++;
+      sections.push({ crn, course: cid, sectionNo, faculty: placed.f.id, slot: placed.slot, room: placed.room, sem: sem.id, students: [] });
+
+      // Four-credit sections (the intro Biology courses) also meet for an 80-minute lab once a
+      // week, taught by the same faculty member, in an actual Lab room -- checked against the
+      // same busy/roomBusy sets as the lecture, so a lab never clashes with anything that faculty
+      // member or room already has this semester.
+      if (courses[cid].credits === 4) {
+        const labSlot = shuffle(labSlots).find((ls) => !busy.has(`${placed.f.id}:${ls.id}`));
+        if (!labSlot) throw new Error(`No lab time free for faculty ${placed.f.id} in ${sem.id}`);
+        const labRoom = shuffle(labRooms).find((r) => !roomBusy.has(`${r}:${labSlot.id}`));
+        if (!labRoom) throw new Error(`No lab room free for ${cid} in ${sem.id}`);
+        busy.add(`${placed.f.id}:${labSlot.id}`);
+        roomBusy.add(`${labRoom}:${labSlot.id}`);
+        labBySection.set(crn, { lab_ID: labRoom, slot: labSlot });
+      }
     }
   }
 });
@@ -346,9 +374,16 @@ const GRADES = ['A','A','A-','A-','B+','B+','B','B','B','B-','C+','C','C','C-','
 const GRADE_RANK = { A: 11, 'A-': 10, 'B+': 9, B: 8, 'B-': 7, 'C+': 6, C: 5, 'C-': 4, 'D+': 3, D: 2, F: 0 };
 const passed = (s, cid, min = 'D') => s.history[cid] !== undefined && GRADE_RANK[s.history[cid]] >= GRADE_RANK[min];
 
+// A course's level sets the minimum undergraduate standing to take it: 1000-level is open to
+// anyone, 2000 needs Sophomore+, 3000 needs Junior+, 4000 needs Senior+. (Graduate 5000-level
+// courses are already gated by course_Type matching the student's grad/undergrad status.)
+const STANDING_ORDER = { Freshman: 1, Sophomore: 2, Junior: 3, Senior: 4 };
+const MIN_STANDING_FOR_LEVEL = { 2: 'Sophomore', 3: 'Junior', 4: 'Senior' };
+const meetsStanding = (s, c) => s.grad || !MIN_STANDING_FOR_LEVEL[c.level] || STANDING_ORDER[s.year] >= STANDING_ORDER[MIN_STANDING_FOR_LEVEL[c.level]];
+
 // Registers every attending student for one semester, enforcing the SRS registration rules:
 // no grad/undergrad mixing (S-F5/6), prerequisites (S-F4), seats (S-F9), credit limits (S-F7/8),
-// not retaking a passed course (S-F10), no time clashes (S-F11).
+// not retaking a passed course (S-F10), no time clashes (S-F11), standing below the course's level.
 function register(semId, open) {
   for (const sec of open) sec.students = [];
   // The demo student (student@campus.edu) registers first so the demo account has a full schedule.
@@ -366,11 +401,15 @@ function register(semId, open) {
       if (c.grad !== s.grad) continue;
       if (sec.students.length >= SECTION_SEATS) continue;
       if (credits + c.credits > MAX_CREDITS[s.type]) continue;
-      if (slotsTaken.has(sec.slot.id) || coursesTaken.has(c.id)) continue;
+      if (!meetsStanding(s, c)) continue;
+      // A lab-bearing section's clash check covers both its lecture and lab meeting times.
+      const lab = labBySection.get(sec.crn);
+      const mySlots = lab ? [sec.slot.id, lab.slot.id] : [sec.slot.id];
+      if (coursesTaken.has(c.id) || mySlots.some((id) => slotsTaken.has(id))) continue;
       if (passed(s, c.id)) continue;
       if (!c.prereqs.every((p) => passed(s, p.id, p.min))) continue;
       sec.students.push({ id: s.id, grade: null });
-      slotsTaken.add(sec.slot.id); coursesTaken.add(c.id);
+      mySlots.forEach((id) => slotsTaken.add(id)); coursesTaken.add(c.id);
       credits += c.credits; count++;
     }
   }
@@ -428,6 +467,9 @@ for (const f of Object.values(faculty)) {
 for (const k of running) {
   insert('Course_Section', ['CRN','course_ID','section_No','faculty_ID','time_Slot_ID','room_ID','semester_ID','max_Seats'],
     [k.crn, k.course, k.sectionNo, k.faculty, k.slot.id, k.room, k.sem, SECTION_SEATS]);
+  const lab = labBySection.get(k.crn);
+  // Only for sections that actually ran (a cancelled section's lab, if it had one, is dropped too).
+  if (lab) insert('Course_Section_Lab', ['CRN','lab_ID','time_Slot_ID'], [k.crn, lab.lab_ID, lab.slot.id]);
 }
 for (const k of running) {
   for (const e of k.students) {
@@ -531,7 +573,7 @@ const ORDER = ['User','Login','Building','Room','Lecture','Lab','Office','Facult
   'Major','Minor','Course','Course_Prerequisite','Major_Course_Requirement','Minor_Course_Requirement',
   'Student','Undergraduate_Student','Full_Time_Undergraduate','Part_Time_Undergraduate','Graduate_Student',
   'Full_Time_Graduate_Student','Part_Time_Graduate_Student','Student_Major','Student_Minor','Advisor','Hold','Student_Hold',
-  'Semester','Day','Period','Time_Slot','Time_Slot_Day','Time_Slot_Period','Course_Section',
+  'Semester','Day','Period','Time_Slot','Time_Slot_Day','Time_Slot_Period','Course_Section','Course_Section_Lab',
   'Enrollment','Attendance','Student_History','Faculty_History','Audit_Log'];
 const missing = ORDER.filter((t) => !tables[t]);
 if (missing.length) throw new Error(`No rows generated for: ${missing.join(', ')}`);
