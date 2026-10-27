@@ -4,7 +4,7 @@ CS5910 System Design and Implementation — Julio Larrea, Muiz M. Onifade, Pavel
 
 Contains the MySQL database schema, generated project data for every table, a working login screen, dashboard pages for
 each role, every student use case (registration, grades, degree audit, majors and minors, address and password),
-admin user creation and course-section creation, and password reset by an emailed code (campus mail). See [DEMO.md](DEMO.md) for the midterm demo.
+admin user creation and course-section creation, and password reset by an emailed code (campus mail).
 
 ## How it is built
 
