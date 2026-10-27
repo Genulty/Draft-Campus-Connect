@@ -28,11 +28,13 @@ function nextSemester(): array
     return one('SELECT semester_ID AS id, semester_Name AS name FROM Semester WHERE start_Date > CURDATE() ORDER BY start_Date LIMIT 1') ?? [];
 }
 
-// Columns shared by every list of course sections.
-const SECTION_COLUMNS = "cs.CRN, cs.course_ID AS Course, c.course_Name AS Title, cs.section_No AS Section, c.course_Credits AS Credits,
+// Columns shared by every list of course sections. No Credits column (degree audit and the
+// registration credit-limit stat are where credits actually matter); Instructor sits between
+// Days and Time when a view includes it (TIME_ROOM is the tail every view ends with).
+const SECTION_COLUMNS = "cs.CRN, cs.course_ID AS Course, c.course_Name AS Title, cs.section_No AS Section,
   (SELECT GROUP_CONCAT(d.day_ID ORDER BY FIELD(d.day_ID,'M','T','W','R','F') SEPARATOR '')
-     FROM Time_Slot_Day d WHERE d.time_Slot_ID = cs.time_Slot_ID) AS Days,
-  CONCAT(TIME_FORMAT(p.start_Time, '%l:%i %p'), ' – ', TIME_FORMAT(p.end_Time, '%l:%i %p')) AS Time,
+     FROM Time_Slot_Day d WHERE d.time_Slot_ID = cs.time_Slot_ID) AS Days";
+const TIME_ROOM = "CONCAT(TIME_FORMAT(p.start_Time, '%l:%i %p'), ' – ', TIME_FORMAT(p.end_Time, '%l:%i %p')) AS Time,
   CONCAT(b.building_Name, ' ', r.room_No) AS Room";
 const SECTION_JOINS = 'JOIN Course c ON c.course_ID = cs.course_ID
   JOIN Time_Slot_Period tp ON tp.time_Slot_ID = cs.time_Slot_ID
@@ -63,7 +65,7 @@ const GPA_POINTS = "CASE h.grade WHEN 'A' THEN 4 WHEN 'A-' THEN 3.7 WHEN 'B+' TH
 // (Course_Section_Lab), when it has one, alongside its lecture.
 function studentSchedule(string $title, int $studentId, string $semesterId, ?string $note = null): array
 {
-    return table($title, 'SELECT ' . SECTION_COLUMNS . ', ' . LAB_COLUMNS . ', ' . INSTRUCTOR . ' FROM Enrollment e
+    return table($title, 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ', ' . LAB_COLUMNS . ' FROM Enrollment e
       JOIN Course_Section cs ON cs.CRN = e.CRN ' . SECTION_JOINS . ' ' . LAB_JOINS . '
       WHERE e.student_ID = ? AND cs.semester_ID = ? ' . ORDER_BY_TIME, [$studentId, $semesterId], $note);
 }
@@ -200,7 +202,7 @@ function viewRegister(array $u, array $q): array
 
     $mine = studentSchedule("My {$sem['semester_Name']} registration", $u['id'], $sem['semester_ID']);
     $mine['action'] = ['label' => 'Drop', 'endpoint' => 'drop-section', 'column' => 'CRN', 'style' => 'danger'];
-    $offered = table('Sections you can add', 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . SEATS . ",
+    $offered = table('Sections you can add', 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ', ' . SEATS . ",
         COALESCE((SELECT GROUP_CONCAT(cp.prerequisite_Course_ID SEPARATOR ', ') FROM Course_Prerequisite cp WHERE cp.course_ID = c.course_ID), '—') AS Prerequisites
       FROM Course_Section cs " . SECTION_JOINS . '
       WHERE cs.semester_ID = ? AND c.dept_ID = ? AND c.course_Type = ?
@@ -381,7 +383,7 @@ function viewTeaching(array $u, array $q): array
     $blocks = [
         stats([['Rank', $f['rank']], ['Type', $f['faculty_Type']], ['Department(s)', $f['depts']], ['Office', $f['office']],
             ["{$cur['name']} sections", count($mine)], ['Advisees', $advisees['n']]]),
-        table("{$cur['name']} teaching schedule", 'SELECT ' . SECTION_COLUMNS . ', ' . SEATS . ' FROM Course_Section cs ' . SECTION_JOINS . '
+        table("{$cur['name']} teaching schedule", 'SELECT ' . SECTION_COLUMNS . ', ' . TIME_ROOM . ', ' . SEATS . ' FROM Course_Section cs ' . SECTION_JOINS . '
           WHERE cs.faculty_ID = ? AND cs.semester_ID = ? ' . ORDER_BY_TIME, [$u['id'], $cur['id']]),
     ];
     foreach ($mine as $s) {
@@ -394,7 +396,7 @@ function viewTeaching(array $u, array $q): array
           WHERE e.CRN = ? GROUP BY u.user_ID, st.student_Year, l.user_Email ORDER BY u.last_Name", [$s['CRN']]);
     }
     if ($next) {
-        $blocks[] = table("{$next['name']} teaching schedule", 'SELECT ' . SECTION_COLUMNS . ' FROM Course_Section cs ' . SECTION_JOINS . '
+        $blocks[] = table("{$next['name']} teaching schedule", 'SELECT ' . SECTION_COLUMNS . ', ' . TIME_ROOM . ' FROM Course_Section cs ' . SECTION_JOINS . '
           WHERE cs.faculty_ID = ? AND cs.semester_ID = ? ' . ORDER_BY_TIME, [$u['id'], $next['id']]);
     }
     return ['title' => "Welcome, {$u['name']}", 'subtitle' => $f['specialty'] ? "Specialty: {$f['specialty']}" : '', 'blocks' => $blocks];
@@ -502,7 +504,7 @@ function viewCreateSection(array $u, array $q): array
                 'options' => array_map(fn ($r) => [$r['room_ID'], "{$r['building_Name']} {$r['room_No']} ({$r['room_Type']}, {$r['capacity']} seats)"], $rooms)],
             ['name' => 'max_Seats', 'label' => 'Max seats', 'type' => 'number', 'min' => 1, 'max' => 10, 'value' => $v('max_Seats', '10')],
         ]],
-        table("Newest {$sem['semester_Name']} sections", 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ' FROM Course_Section cs ' . SECTION_JOINS . '
+        table("Newest {$sem['semester_Name']} sections", 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ' FROM Course_Section cs ' . SECTION_JOINS . '
           WHERE cs.semester_ID = ? ORDER BY cs.CRN DESC LIMIT 5', [$sem['semester_ID']]),
     ]];
 }
@@ -640,8 +642,9 @@ function publicMajorBrowser(array $q): array
     $sections = rows(
         'SELECT DISTINCT ' .
         SECTION_COLUMNS . ', ' .
-        LAB_COLUMNS . ', ' .
         INSTRUCTOR . ', ' .
+        TIME_ROOM . ', ' .
+        LAB_COLUMNS . ', ' .
         SEATS . '
         FROM Course_Section cs
         ' . SECTION_JOINS . '
@@ -698,7 +701,7 @@ function masterSchedule(array $q): array
 {
     [$semester, $deptId, $filters] = semesterFilter($q);
     return [$filters,
-        table('Course sections', 'SELECT ' . SECTION_COLUMNS . ', ' . LAB_COLUMNS . ', ' . INSTRUCTOR . ', ' . SEATS . '
+        table('Course sections', 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ', ' . LAB_COLUMNS . ', ' . SEATS . '
           FROM Course_Section cs ' . SECTION_JOINS . ' ' . LAB_JOINS . "
           WHERE cs.semester_ID = ? AND (? = '' OR c.dept_ID = ?) ORDER BY cs.course_ID, cs.section_No", [$semester, $deptId, $deptId])];
 }
@@ -725,7 +728,7 @@ function viewCatalog(array $u, array $q): array
             COALESCE((SELECT GROUP_CONCAT(CONCAT(cp.prerequisite_Course_ID, ' (min ', cp.min_Grade_Req, ')') SEPARATOR ', ')
               FROM Course_Prerequisite cp WHERE cp.course_ID = c.course_ID), '—') AS Prerequisites
           FROM Course c WHERE c.dept_ID = ? ORDER BY c.course_ID", [$deptId]),
-        table("{$cur['name']} sections offered", 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . SEATS . '
+        table("{$cur['name']} sections offered", 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ', ' . SEATS . '
           FROM Course_Section cs ' . SECTION_JOINS . "
           WHERE cs.semester_ID = ? AND c.dept_ID = ? " . ORDER_BY_TIME, [$cur['id'], $deptId],
             'Who is teaching each section this semester, and when and where it meets.'),
