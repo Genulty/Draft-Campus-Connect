@@ -549,7 +549,146 @@ function viewEnrollmentCounts(array $u, array $q): array
     ]];
 }
 
-// ---------------- Pages shared by several roles ----------------
+// Pages shared by several roles
+function publicMajorBrowser(array $q): array
+{
+    // Get the available semesters from MySQL.
+    $semesters = rows(
+       "SELECT semester_ID, semester_Name
+        FROM Semester
+        WHERE semester_ID IN ('FA26', 'SP27')
+        ORDER BY start_Date"
+    );
+
+
+    // Get the actual majors from MySQL.
+    $majors = rows(
+        'SELECT major_ID, major_Name
+         FROM Major
+         ORDER BY major_Name'
+    );
+
+    // Use the current semester by default.
+    $semester = $q['semester'] ?? 'FA26';
+
+    if (!in_array($semester, array_column($semesters, 'semester_ID'), true)) {
+    $semester = 'FA26';
+}
+
+    // No major selected by default.
+    $major = (string) ($q['major'] ?? '');
+
+    $majorIds = array_map(
+        'strval',
+        array_column($majors, 'major_ID')
+    );
+
+    if (!in_array($major, $majorIds, true)) {
+        $major = '';
+    }
+
+    // Build the semester and major dropdowns.
+    $filters = [
+        'type' => 'filters',
+        'filters' => [
+            [
+                'name' => 'semester',
+                'label' => 'Semester',
+                'value' => $semester,
+                'options' => array_map(
+                    fn ($s) => [
+                        $s['semester_ID'],
+                        $s['semester_Name']
+                    ],
+                    $semesters
+                )
+            ],
+            [
+                'name' => 'major',
+                'label' => 'Choose Major',
+                'value' => $major,
+                'options' => array_merge(
+                    [['', 'Choose a major']],
+                    array_map(
+                        fn ($m) => [
+                            (string) $m['major_ID'],
+                            $m['major_Name']
+                        ],
+                        $majors
+                    )
+                )
+            ]
+        ]
+    ];
+
+    // Display the welcome message until
+    // the visitor selects a major.
+    if ($major === '') {
+        return [
+            $filters,
+            [
+                'type' => 'empty-major',
+                'message' =>
+                    'Select a major above to explore available courses.'
+            ]
+        ];
+    }
+    // Retrieve real course sections for the selected major.
+    $sections = rows(
+        'SELECT DISTINCT ' .
+        SECTION_COLUMNS . ', ' .
+        LAB_COLUMNS . ', ' .
+        INSTRUCTOR . ', ' .
+        SEATS . '
+        FROM Course_Section cs
+        ' . SECTION_JOINS . '
+        ' . LAB_JOINS . '
+        JOIN Major_Course_Requirement mcr
+          ON mcr.course_ID = cs.course_ID
+        WHERE cs.semester_ID = ?
+          AND mcr.major_ID = ?
+        ORDER BY cs.course_ID, cs.section_No',
+        [$semester, $major]
+    );
+
+    // Group multiple sections under each course.
+    $grouped = [];
+
+    foreach ($sections as $row) {
+        $code = $row['Course'];
+
+        if (!isset($grouped[$code])) {
+            $grouped[$code] = [
+                'code' => $code,
+                'title' => $row['Title'],
+                'credits' => $row['Credits'],
+                'sections' => []
+            ];
+        }
+
+        $grouped[$code]['sections'][] = [
+            'section' => $row['Section'],
+            'crn' => $row['CRN'],
+            'days' => $row['Days'] ?? '—',
+            'time' => $row['Time'] ?? '—',
+            'room' => $row['Room'] ?? '—',
+            'instructor' => $row['Instructor'] ?? 'TBA',
+            'seats' => $row['Open seats'],
+            'labDays' => $row['Lab days'] ?? null,
+            'labTime' => $row['Lab time'] ?? null,
+            'labRoom' => $row['Lab room'] ?? null
+        ];
+    }
+
+    return [
+        $filters,
+        [
+            'type' => 'course-cards',
+            'title' => 'Available courses',
+            'courses' => array_values($grouped)
+        ]
+    ];
+}
 
 // The semester master schedule (filters + every section). Public: the welcome page shows it without signing in.
 function masterSchedule(array $q): array

@@ -142,3 +142,204 @@ button.ghost:hover { background: rgba(255,255,255,.08); }
 .mail-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .mail-body { margin-top: 8px; font-size: .9rem; color: #16213a; line-height: 1.5; overflow-wrap: anywhere; }
 .mail-body a { color: #2b5aa6; font-weight: 600; }
+
+/* Campus Connect - Major Course Explorer */
+
+.major-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+
+  min-height: 240px;
+  padding: 40px 24px;
+  margin-top: 20px;
+
+  background: #f8faff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+}
+
+.major-empty-icon {
+  font-size: 44px;
+  margin-bottom: 14px;
+}
+
+.major-empty h3 {
+  font-size: 19px;
+  font-weight: 600;
+  color: #1f3454;
+  margin: 0 0 10px;
+}
+
+.major-empty p {
+  max-width: 400px;
+  line-height: 1.6;
+  color: #718096;
+  margin: 0;
+}
+
+@media (max-width: 600px) {
+  .major-empty {
+    min-height: 200px;
+    padding: 30px 18px;
+  }
+
+  .major-empty h3 {
+    font-size: 17px;
+  }
+}
+
+/* Public Course Browser - Expandable Course Cards */
+
+#explore-courses .course-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 24px;
+}
+
+#explore-courses .course-card-list h3 {
+  color: #1f3454;
+  font-size: 20px;
+  margin-bottom: 8px;
+}
+
+#explore-courses .course-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+#explore-courses .course-card[open] {
+  border-color: #9bb4da;
+}
+
+#explore-courses .course-card-summary {
+  padding: 20px;
+  cursor: pointer;
+}
+
+#explore-courses .course-card-summary:hover {
+  background: #f8faff;
+}
+
+#explore-courses .course-card-summary:focus-visible {
+  outline: 2px solid #315d9a;
+  outline-offset: -3px;
+}
+
+#explore-courses .course-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#explore-courses .course-card-info strong {
+  color: #203e6b;
+  font-size: 16px;
+}
+
+#explore-courses .course-card-sections {
+  padding: 0 20px 18px;
+  border-top: 1px solid #edf0f5;
+}
+
+#explore-courses .course-section {
+  padding: 16px 0;
+  border-bottom: 1px solid #edf0f5;
+}
+
+#explore-courses .course-section:last-child {
+  border-bottom: none;
+}
+
+#explore-courses .course-section strong {
+  color: #203e6b;
+}
+
+#explore-courses .course-section p {
+  margin: 7px 0;
+  color: #52627b;
+  font-size: 14px;
+}
+
+@media (max-width: 600px) {
+  #explore-courses .course-card-summary {
+    padding: 16px;
+  }
+
+  #explore-courses .course-card-info strong {
+    font-size: 15px;
+  }
+
+  #explore-courses .course-card-sections {
+    padding: 0 16px 14px;
+  }
+}
+
+/* Final polish for public course explorer */
+
+#explore-courses .filters label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+#explore-courses .course-card-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  list-style: none;
+}
+
+#explore-courses .course-card-summary::-webkit-details-marker {
+  display: none;
+}
+
+#explore-courses .course-card-summary::after {
+  content: "⌄";
+  font-size: 24px;
+  color: #203e6b;
+  flex-shrink: 0;
+}
+
+#explore-courses .course-card[open]
+.course-card-summary::after {
+  content: "⌃";
+}
+
+#explore-courses .course-card-info {
+  flex: 1;
+  min-width: 0;
+}
+
+#explore-courses .course-card-summary:hover {
+  background-color: #f4f7fc;
+}
+
+/* Public course seat availability */
+
+#explore-courses .seat-available,
+#explore-courses .seat-full {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 10px;
+}
+
+#explore-courses .seat-available {
+  background: #e6f6ec;
+  color: #176b3a;
+}
+
+#explore-courses .seat-full {
+  background: #fff1df;
+  color: #965600;
+}

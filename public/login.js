@@ -84,6 +84,29 @@ function renderBlock(block, viewId, onFilter = (params) => openView(viewId, para
     return grid;
   }
   if (block.type === 'message') return renderFlash(block);
+
+if (block.type === 'empty-major') {
+  const card = el('div', 'major-empty');
+
+  const icon = el('div', 'major-empty-icon', '🎓');
+
+  const title = el(
+    'h3',
+    null,
+    'Find courses in your area of interest'
+  );
+
+  const description = el(
+    'p',
+    'muted',
+    block.message
+  );
+
+  card.append(icon, title, description);
+
+  return card;
+}
+
   if (block.type === 'mail') return renderMail(block.messages);
   if (block.type === 'filters') {
     const bar = el('div', 'filters');
@@ -153,6 +176,72 @@ function renderBlock(block, viewId, onFilter = (params) => openView(viewId, para
     });
     return card;
   }
+
+  // Public course browser: expandable course cards
+  if (block.type === 'course-cards') {
+    const container = el('div', 'course-card-list');
+
+    const heading = el('h3', null, block.title);
+    container.append(heading);
+
+    for (const course of block.courses) {
+      const card = el('details', 'course-card');
+
+      const summary = el('summary', 'course-card-summary');
+
+      const info = el('div', 'course-card-info');
+
+      info.append(
+        el('strong', null,
+          `${course.code} — ${course.title}`),
+        el('span', 'muted small',
+          `${course.credits} credits · ${course.sections.length} section(s)`)
+      );
+
+      summary.append(info);
+      card.append(summary);
+
+      const sections = el('div', 'course-card-sections');
+
+      for (const section of course.sections) {
+        const item = el('div', 'course-section');
+
+        item.append(
+          el('strong', null, `Section ${section.section}`),
+          el('p', null, `CRN: ${section.crn}`),
+          el('p', null, `Schedule: ${section.days} · ${section.time}`),
+          el('p', null, `Instructor: ${section.instructor}`),
+          el('p', null, `Room: ${section.room}`)
+        );
+
+  const openSeats = Number(section.seats);
+
+  const availability = el(
+  'span',
+  openSeats > 0 ? 'seat-available' : 'seat-full',
+  openSeats > 0
+    ? `${openSeats} seats available`
+    : 'Full'
+);
+
+item.append(availability);
+        if (section.labDays && section.labDays !== '—') {
+          item.append(
+            el('p', null,
+              `Lab: ${section.labDays} · ${section.labTime} · ${section.labRoom}`)
+          );
+        }
+
+        sections.append(item);
+      }
+
+      card.append(sections);
+      container.append(card);
+    }
+
+    return container;
+  }
+
   // table
   const card = el('div', 'table-card');
   const head = el('div', 'table-head');
@@ -464,10 +553,9 @@ async function loadWelcome() {
 
 // The public master schedule on the welcome page, with its semester and department filters.
 async function loadPublicSchedule(params = {}) {
-  const box = document.getElementById('w-schedule');
-  try {
-    const res = await fetch(`/api/master-schedule?${new URLSearchParams(params)}`);
-    if (!res.ok) throw new Error();
+    const box = document.getElementById('w-schedule');
+    try {
+    const res = await fetch(`/api/major-browser?${new URLSearchParams(params)}`);    if (!res.ok) throw new Error();
     const { blocks } = await res.json();
     box.replaceChildren(...blocks.map((b) => renderBlock(b, null, loadPublicSchedule)));
   } catch {
