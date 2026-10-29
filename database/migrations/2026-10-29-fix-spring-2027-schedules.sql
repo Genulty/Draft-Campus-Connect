@@ -1,0 +1,53 @@
+-- HISTORICAL RECORD ONLY - ALREADY APPLIED TO THE LOCAL DEVELOPMENT DATABASE.
+-- All original SQL is retained below as comments to prevent accidental re-execution.
+-- This file executes no statements, including START TRANSACTION or COMMIT.
+-- It is not a migration for AWS or any other environment. See README.md.
+-- Original SHA-256: 5ce5ba780d172ed6d1ad904efb4a921c6a1e2ac7ee432680f46482e0ce35afc0
+-- Original SQL follows; remove no prefixes without explicit authorization.
+-- |
+-- |-- Campus Connect: Spring 2027 Scheduling Correction
+-- |-- 13 undergraduate 3-credit courses
+-- |-- Each meets twice weekly for 80 minutes.
+-- |
+-- |START TRANSACTION;
+-- |
+-- |UPDATE Course_Section
+-- |SET time_Slot_ID = CASE CRN
+-- |    WHEN 10548 THEN 1
+-- |    WHEN 10557 THEN 3
+-- |    WHEN 10563 THEN 2
+-- |    WHEN 10578 THEN 4
+-- |    WHEN 10583 THEN 5
+-- |    WHEN 10586 THEN 6
+-- |    WHEN 10588 THEN 8
+-- |    WHEN 10598 THEN 11
+-- |    WHEN 10599 THEN 7
+-- |    WHEN 10601 THEN 9
+-- |    WHEN 10614 THEN 10
+-- |    WHEN 10617 THEN 12
+-- |    WHEN 10620 THEN 13
+-- |    ELSE time_Slot_ID
+-- |END
+-- |WHERE semester_ID = 'SP27'
+-- |AND CRN IN (
+-- |    10548,10557,10563,10578,10583,
+-- |    10586,10588,10598,10599,10601,
+-- |    10614,10617,10620
+-- |);
+-- |
+-- |-- Verify all 13 updates.
+-- |SELECT
+-- |    CRN,
+-- |    course_ID,
+-- |    time_Slot_ID
+-- |FROM Course_Section
+-- |WHERE semester_ID = 'SP27'
+-- |AND CRN IN (
+-- |    10548,10557,10563,10578,10583,
+-- |    10586,10588,10598,10599,10601,
+-- |    10614,10617,10620
+-- |)
+-- |ORDER BY CRN;
+-- |
+-- |-- No COMMIT yet.
+-- |-- Validate conflicts before committing.

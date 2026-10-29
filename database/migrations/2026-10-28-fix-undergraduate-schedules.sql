@@ -1,0 +1,79 @@
+-- HISTORICAL RECORD ONLY - ALREADY APPLIED TO THE LOCAL DEVELOPMENT DATABASE.
+-- All original SQL is retained below as comments to prevent accidental re-execution.
+-- This file executes no statements, including START TRANSACTION or COMMIT.
+-- It is not a migration for AWS or any other environment. See README.md.
+-- Original SHA-256: e7c3da3876432f1c8e9d809186e45df6942c5340fa1a3e379c4f9071089d8594
+-- Original SQL follows; remove no prefixes without explicit authorization.
+-- |
+-- |-- Campus Connect: Fall 2026 scheduling correction
+-- |-- Local development only.
+-- |-- Do not COMMIT until validation is complete.
+-- |
+-- |START TRANSACTION;
+-- |
+-- |-- Create seven 80-minute periods.
+-- |INSERT INTO Period (period_ID, start_Time, end_Time)
+-- |VALUES
+-- |(18, '08:00:00', '09:20:00'),
+-- |(19, '09:50:00', '11:10:00'),
+-- |(20, '11:40:00', '13:00:00'),
+-- |(21, '14:40:00', '16:00:00'),
+-- |(22, '16:30:00', '17:50:00'),
+-- |(23, '18:20:00', '19:40:00'),
+-- |(24, '20:10:00', '21:30:00');
+-- |
+-- |-- Create 14 new time slots.
+-- |INSERT INTO Time_Slot (time_Slot_ID)
+-- |VALUES
+-- |(35), (36), (37), (38), (39), (40), (41),
+-- |(42), (43), (44), (45), (46), (47), (48);
+-- |
+-- |-- Copy the original meeting days.
+-- |INSERT INTO Time_Slot_Day (time_Slot_ID, day_ID)
+-- |SELECT time_Slot_ID + 14, day_ID
+-- |FROM Time_Slot_Day
+-- |WHERE time_Slot_ID BETWEEN 21 AND 34;
+-- |
+-- |-- Map old periods 11-17 to new periods 18-24.
+-- |INSERT INTO Time_Slot_Period (time_Slot_ID, period_ID)
+-- |SELECT tsp.time_Slot_ID + 14,
+-- |       tsp.period_ID + 7
+-- |FROM Time_Slot_Period tsp
+-- |WHERE tsp.time_Slot_ID BETWEEN 21 AND 34;
+-- |
+-- |-- Update only three-credit undergraduate courses.
+-- |UPDATE Course_Section cs
+-- |JOIN Course c ON c.course_ID = cs.course_ID
+-- |SET cs.time_Slot_ID = cs.time_Slot_ID + 14
+-- |WHERE cs.semester_ID = 'FA26'
+-- |  AND c.course_Type = 'Undergraduate'
+-- |  AND c.course_Credits = 3
+-- |  AND cs.time_Slot_ID BETWEEN 21 AND 34;
+-- |
+-- |-- Must return 57.
+-- |SELECT ROW_COUNT() AS updated_sections;
+-- |
+-- |-- Must return 57 compliant sections.
+-- |SELECT
+-- |    COUNT(*) AS compliant_sections
+-- |FROM Course_Section cs
+-- |JOIN Course c ON c.course_ID = cs.course_ID
+-- |JOIN (
+-- |    SELECT time_Slot_ID,
+-- |           COUNT(DISTINCT day_ID) AS meeting_days
+-- |    FROM Time_Slot_Day
+-- |    GROUP BY time_Slot_ID
+-- |) d ON d.time_Slot_ID = cs.time_Slot_ID
+-- |JOIN Time_Slot_Period tsp
+-- |    ON tsp.time_Slot_ID = cs.time_Slot_ID
+-- |JOIN Period p ON p.period_ID = tsp.period_ID
+-- |WHERE cs.semester_ID = 'FA26'
+-- |  AND c.course_Type = 'Undergraduate'
+-- |  AND c.course_Credits = 3
+-- |  AND d.meeting_days = 2
+-- |  AND TIME_TO_SEC(
+-- |      TIMEDIFF(p.end_Time, p.start_Time)
+-- |  ) / 60 = 80;
+-- |
+-- |-- No COMMIT here.
+-- |-- Run conflict checks before saving permanently.

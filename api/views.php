@@ -28,10 +28,19 @@ function nextSemester(): array
     return one('SELECT semester_ID AS id, semester_Name AS name FROM Semester WHERE start_Date > CURDATE() ORDER BY start_Date LIMIT 1') ?? [];
 }
 
-// Columns shared by every list of course sections. No Credits column (degree audit and the
-// registration credit-limit stat are where credits actually matter); Instructor sits between
-// Days and Time when a view includes it (TIME_ROOM is the tail every view ends with).
+// Display the existing course-number convention without changing registration rules.
+// Graduate classification comes from course_Type; unfamiliar undergraduate codes stay unclassified.
+const COURSE_LEVEL = "CASE
+  WHEN c.course_Type = 'Graduate' THEN 'Graduate'
+  WHEN c.course_Type = 'Undergraduate' AND c.course_ID REGEXP '^[A-Za-z]+[1-4][0-9]{2,3}$'
+    THEN CASE LEFT(REGEXP_SUBSTR(c.course_ID, '[0-9]+'), 1)
+      WHEN '1' THEN 'Freshman' WHEN '2' THEN 'Sophomore'
+      WHEN '3' THEN 'Junior' WHEN '4' THEN 'Senior' END
+  ELSE 'Unclassified' END";
+
+// Columns shared by course-section lists, including the credits used by the major browser.
 const SECTION_COLUMNS = "cs.CRN, cs.course_ID AS Course, c.course_Name AS Title, cs.section_No AS Section,
+  c.course_Credits AS Credits, " . COURSE_LEVEL . " AS Level,
   (SELECT GROUP_CONCAT(d.day_ID ORDER BY FIELD(d.day_ID,'M','T','W','R','F') SEPARATOR '')
      FROM Time_Slot_Day d WHERE d.time_Slot_ID = cs.time_Slot_ID) AS Days";
 const TIME_ROOM = "CONCAT(TIME_FORMAT(p.start_Time, '%l:%i %p'), ' – ', TIME_FORMAT(p.end_Time, '%l:%i %p')) AS Time,
@@ -315,6 +324,260 @@ function viewDegreeAudit(array $u, array $q): array
         $blocks[] = ['type' => 'table', 'title' => "{$p['kind']}: {$p['name']}", 'note' => null,
             'columns' => ['Course', 'Title', 'Credits', 'Minimum grade', 'Your grade', 'Taken', 'Status'], 'rows' => $rows];
     }
+
+    // Display academic history outside the student's declared major core.
+    // Classification into Gen Ed, Liberal Arts, and electives comes later.
+    $otherCourses = rows("
+        SELECT
+            h.course_ID,
+            c.course_Name,
+            c.course_Credits,
+            h.grade,
+            sem.semester_Name
+        FROM Student_History h
+        JOIN Course c ON c.course_ID = h.course_ID
+        JOIN Semester sem ON sem.semester_ID = h.semester_ID
+        WHERE h.student_ID = ?
+          AND NOT EXISTS (
+              SELECT 1
+              FROM Student_Major sm
+              JOIN Major_Course_Requirement mcr
+                ON mcr.major_ID = sm.major_ID
+              WHERE sm.student_ID = h.student_ID
+                AND mcr.course_ID = h.course_ID
+          )
+        ORDER BY sem.start_Date DESC, h.course_ID
+    ", [$u['id']]);
+
+    $blocks[] = [
+        'type' => 'table',
+        'title' => 'Other Academic Coursework',
+        'note' => 'Courses outside declared major core requirements. These have not yet been classified as General Education, Liberal Arts, or electives.',
+        'columns' => [
+            'Course', 'Title', 'Credits', 'Grade', 'Semester'
+        ],
+        'rows' => array_map(
+            fn($r) => [
+                $r['course_ID'],
+                $r['course_Name'],
+                $r['course_Credits'],
+                $r['grade'],
+                $r['semester_Name']
+            ],
+            $otherCourses
+        )
+    ];
+
+    // Academic credit summary from completed course history.
+    // Each passed course counts only once, even if repeated.
+    // This is not yet a full graduation eligibility calculation.
+    $creditSummary = one("
+        SELECT
+            COUNT(*) AS completed_courses,
+            COALESCE(SUM(course_Credits), 0) AS recorded_credits
+        FROM (
+            SELECT h.course_ID, MAX(c.course_Credits) AS course_Credits
+            FROM Student_History h
+            JOIN Course c ON c.course_ID = h.course_ID
+            WHERE h.student_ID = ?
+              AND h.grade IN (
+                  'A+', 'A', 'A-', 'B+', 'B', 'B-',
+                  'C+', 'C', 'C-', 'D+', 'D', 'D-'
+              )
+            GROUP BY h.course_ID
+        ) passed_courses
+    ", [$u['id']]);
+
+    $summary[] = [
+        'Recorded credits (provisional)',
+        $creditSummary['recorded_credits'] . ' / 120'
+    ];
+
+    $summary[] = [
+        'Courses with passing grades',
+        $creditSummary['completed_courses']
+    ];
+
+    // Proposed General Education requirements.
+    // Temporary rules for demonstration; no schema changes.
+    $genEdCategories = [
+        'Written Communication' => ['ENG110'],
+        'Mathematics' => ['MATH110', 'MATH225', 'CS220'],
+        'Natural Sciences' => ['BIO110', 'BIO115'],
+        'Humanities' => ['ENG115', 'ENG220'],
+        'Social Sciences' => ['PSY110', 'BUS220'],
+    ];
+
+    $passedGrades = [
+        'A+', 'A', 'A-', 'B+', 'B', 'B-',
+        'C+', 'C', 'C-', 'D+', 'D', 'D-'
+    ];
+
+    $history = rows("
+        SELECT h.course_ID, c.course_Name,
+               c.course_Credits, h.grade
+        FROM Student_History h
+        JOIN Course c ON c.course_ID = h.course_ID
+        WHERE h.student_ID = ?
+    ", [$u['id']]);
+
+    $genEdRows = [];
+    $genEdCompleted = 0;
+
+    foreach ($genEdCategories as $category => $approved) {
+        $matched = null;
+
+        foreach ($history as $course) {
+            if (
+                in_array($course['course_ID'], $approved, true)
+                && in_array($course['grade'], $passedGrades, true)
+            ) {
+                $matched = $course;
+                break;
+            }
+        }
+
+        if ($matched !== null) {
+            $genEdCompleted++;
+
+            $genEdRows[] = [
+                $category,
+                $matched['course_ID'],
+                $matched['course_Name'],
+                $matched['course_Credits'],
+                $matched['grade'],
+                'Completed'
+            ];
+        } else {
+            $genEdRows[] = [
+                $category,
+                implode(', ', $approved),
+                'Approved options',
+                '—',
+                '—',
+                'Not completed'
+            ];
+        }
+    }
+
+    $summary[] = [
+        'General Education (proposed)',
+        $genEdCompleted . ' of '
+            . count($genEdCategories) . ' categories'
+    ];
+
+    $blocks[] = [
+        'type' => 'table',
+        'title' => 'General Education Requirements (Proposed)',
+        'note' => 'Initial demonstration rules. Final requirements and eligible courses are pending approval.',
+        'columns' => [
+            'Requirement',
+            'Course',
+            'Title',
+            'Credits',
+            'Grade',
+            'Status'
+        ],
+        'rows' => $genEdRows
+    ];
+
+    // Proposed Liberal Arts classification for demonstration.
+    // Course eligibility must eventually be reviewed individually.
+    $liberalArtsDepartments = ['BIO', 'ENG', 'MATH', 'PSY'];
+    $liberalArtsRequired = 60;
+
+    // Reuse the student history retrieved for General Education.
+    // Include only undergraduate courses with passing grades.
+    // A repeated course counts only once.
+    $liberalArtsCourses = [];
+    foreach ($history as $course) {
+        $courseId = $course['course_ID'];
+
+        // Department prefix from the existing course identifiers.
+        $department = preg_replace('/[0-9].*$/', '', $courseId);
+        $number = (int) preg_replace('/^[^0-9]+/', '', $courseId);
+
+        if (
+            in_array($department, $liberalArtsDepartments, true)
+            && $number < 500
+            && in_array($course['grade'], $passedGrades, true)
+            && !isset($liberalArtsCourses[$courseId])
+        ) {
+            $liberalArtsCourses[$courseId] = $course;
+        }
+    }
+
+    $liberalArtsCredits = array_sum(array_map(
+        fn($course) => (int) $course['course_Credits'],
+        $liberalArtsCourses
+    ));
+
+    $summary[] = [
+        'Liberal Arts Credits (Proposed)',
+        $liberalArtsCredits . ' / ' . $liberalArtsRequired
+    ];
+
+    $blocks[] = [
+        'type' => 'table',
+        'title' => 'Liberal Arts Requirements (Proposed)',
+        'note' => 'Provisional classification based on department. Final course eligibility requires approval.',
+        'columns' => [
+            'Course',
+            'Title',
+            'Credits',
+            'Grade',
+            'Status'
+        ],
+        'rows' => array_map(
+            fn($course) => [
+                $course['course_ID'],
+                $course['course_Name'],
+                $course['course_Credits'],
+                $course['grade'],
+                'Completed'
+            ],
+            array_values($liberalArtsCourses)
+        )
+    ];
+
+    // Proposed elective requirements.
+    // No courses are classified as major electives until approved
+    // elective lists are defined for each major.
+    $majorElectiveRequired = 9;
+    $freeElectiveRequired = 15;
+
+    $summary[] = [
+        'Major Electives (Proposed)',
+        '0 / ' . $majorElectiveRequired . ' credits'
+    ];
+
+    $blocks[] = [
+        'type' => 'table',
+        'title' => 'Major Electives (Proposed)',
+        'note' => '9 credits required. Approved major-elective course lists have not yet been configured.',
+        'columns' => ['Requirement', 'Credits', 'Status'],
+        'rows' => [
+            ['Approved major electives', '0 / 9', 'Not configured']
+        ]
+    ];
+
+    // Do not automatically classify all non-major courses as free electives.
+    // Some may satisfy General Education, other requirements, or a minor.
+    $summary[] = [
+        'Free Electives (Proposed)',
+        'Pending classification'
+    ];
+
+    $blocks[] = [
+        'type' => 'table',
+        'title' => 'Free Electives (Proposed)',
+        'note' => '15-credit target. Courses will be assigned only after degree requirement rules are finalized.',
+        'columns' => ['Requirement', 'Credits', 'Status'],
+        'rows' => [
+            ['Free elective credits', '— / 15', 'Not configured']
+        ]
+    ];
+
     return ['title' => 'Degree audit', 'subtitle' => 'Required courses for each of your programs. A course counts once you earn at least its minimum grade.',
         'blocks' => [stats($summary), ...$blocks]];
 }
@@ -668,6 +931,7 @@ function publicMajorBrowser(array $q): array
                 'code' => $code,
                 'title' => $row['Title'],
                 'credits' => $row['Credits'],
+                'level' => $row['Level'],
                 'sections' => []
             ];
         }
@@ -724,7 +988,7 @@ function viewCatalog(array $u, array $q): array
           LEFT JOIN Building b ON b.building_ID = r.building_ID ORDER BY d.dept_Name"),
         ['type' => 'filters', 'filters' => [['name' => 'dept', 'label' => 'Department', 'value' => $deptId,
             'options' => array_map(fn ($d) => [$d['dept_ID'], $d['dept_Name']], $depts)]]],
-        table('Courses in this department', "SELECT c.course_ID AS Course, c.course_Name AS Title, c.course_Credits AS Credits, c.course_Type AS Level,
+        table('Courses in this department', "SELECT c.course_ID AS Course, c.course_Name AS Title, c.course_Credits AS Credits, c.course_Type AS Type, " . COURSE_LEVEL . " AS Level,
             COALESCE((SELECT GROUP_CONCAT(CONCAT(cp.prerequisite_Course_ID, ' (min ', cp.min_Grade_Req, ')') SEPARATOR ', ')
               FROM Course_Prerequisite cp WHERE cp.course_ID = c.course_ID), '—') AS Prerequisites
           FROM Course c WHERE c.dept_ID = ? ORDER BY c.course_ID", [$deptId]),

@@ -195,7 +195,7 @@ if (block.type === 'empty-major') {
         el('strong', null,
           `${course.code} — ${course.title}`),
         el('span', 'muted small',
-          `${course.credits} credits · ${course.sections.length} section(s)`)
+          `${course.level} · ${course.credits} credits · ${course.sections.length} section(s)`)
       );
 
       summary.append(info);
