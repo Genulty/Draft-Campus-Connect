@@ -50,6 +50,108 @@ async function openView(id, params = {}, flash = null) {
   blocks.replaceChildren(...(flash ? [renderFlash(flash)] : []), ...(page.blocks || []).map((b) => renderBlock(b, id)));
 }
 
+// Student audit: recorded progress is separated from policies the database cannot establish.
+function renderDegreeAudit(audit) {
+  const root = el('div', 'degree-audit');
+  const section = (title, note = null) => {
+    const box = el('section', 'audit-section');
+    box.append(el('h3', 'audit-section-title', title));
+    if (note) box.append(el('p', 'muted audit-note', note));
+    return box;
+  };
+  const auditTable = (title, columns, rows, empty) => {
+    const block = renderBlock({ type: 'table', title, columns, rows, note: null }, null);
+    if (!rows.length) block.querySelector('.empty-row').textContent = empty;
+    return block;
+  };
+  const profile = section('Student academic profile');
+  profile.append(el('p', 'audit-student-name', audit.profile.name));
+  const fields = el('dl', 'audit-profile-grid');
+  const majors = audit.programs.filter(p => p.kind === 'Major');
+  const minors = audit.programs.filter(p => p.kind === 'Minor');
+  for (const [label, value] of [
+    ['Student ID', audit.profile.id], ['Student type', audit.profile.type],
+    ['Academic year', audit.profile.year], ['Enrollment status', audit.profile.enrollment_status],
+    ['Degree program', majors.map(p => `${p.name}${Number(p.is_primary) ? ' (primary)' : ''}`).join('; ') || 'Not on file'],
+    ['Minor', minors.map(p => p.name).join('; ') || 'None declared'], ['Records checked', audit.profile.as_of],
+  ]) {
+    const field = el('div'); field.append(el('dt', null, label), el('dd', null, String(value))); fields.append(field);
+  }
+  profile.append(fields); root.append(profile);
+
+  const credit = section('Overall credit progress', 'Program-specific graduation credit targets are not stored. Overall degree completion cannot be calculated.');
+  credit.append(renderBlock({ type: 'stats', items: [
+    { label: 'Passing-course credits · provisional', value: audit.credits.earned_provisional },
+    { label: 'In-progress credits · not earned', value: audit.credits.in_progress },
+    { label: 'Future registered credits · not earned', value: audit.credits.future_registered },
+    { label: 'Overall degree completion', value: 'Unavailable' },
+  ] }, null));
+  credit.append(el('p', 'muted audit-note', `${audit.credits.passing_courses} distinct courses with recognized passing transcript grades. Credits count once per course using current course credits. In-progress totals also count distinct courses and are not added to earned credits; repeats and graduation credit policies need confirmation.`));
+  credit.append(el('p', 'muted audit-note', `Stored student credit total: ${audit.profile.stored_credits ?? 'Unavailable'}. This separate record is not used as a graduation target.`));
+  root.append(credit);
+
+  for (const [kind, programs] of [['Major', majors], ['Minor', minors]]) {
+    const group = section(`${kind} requirements`, 'Percentages describe only each stored required-course list. Programs are checked independently; cross-program credit sharing and final degree eligibility are not established.');
+    if (!programs.length) group.append(el('p', 'muted', kind === 'Minor' ? 'No minor declared.' : 'No major recorded. Requirements are unavailable.'));
+    for (const program of programs) {
+      const card = el('details', 'audit-program'); card.open = true;
+      const summary = el('summary', 'audit-program-heading');
+      const title = el('div'); title.append(el('strong', null, program.name), el('span', 'muted small', program.id));
+      const state = el('span', `audit-state${program.total && program.met === program.total ? ' audit-state-met' : ''}`,
+        program.percent === null ? 'Requirements unavailable' : `${program.met} of ${program.total} listed courses met · ${program.percent}%`);
+      summary.append(title, state); card.append(summary);
+      if (program.percent !== null) {
+        const meter = el('progress', 'audit-progress'); meter.max = program.total; meter.value = program.met;
+        meter.setAttribute('aria-label', `${program.name}: ${program.met} of ${program.total} listed course requirements met`); card.append(meter);
+        card.append(el('p', 'muted audit-program-note', `${program.met_credits} of ${program.listed_credits} credits represented by this course list are met in records. This is not the full degree credit requirement.`));
+      }
+      card.append(auditTable('Required courses', ['Course', 'Title', 'Credits', 'Minimum grade', 'Best recorded grade', 'Transcript attempts', 'Status'],
+        program.requirements.map(r => [r.code, r.title, r.credits, r.minimum_grade, r.best_grade ?? '—',
+          r.attempts.map(a => `${a.grade} · ${a.semester}`).join('; ') || 'None recorded', r.status]), 'No requirement mappings are stored for this program. Completion is unavailable.'));
+      group.append(card);
+    }
+    root.append(group);
+  }
+
+  const unavailable = el('div', 'audit-unavailable-grid');
+  for (const item of audit.unavailable) {
+    const card = section(item.title); card.append(el('span', 'audit-state', 'Unavailable'), el('p', 'muted audit-note', item.reason)); unavailable.append(card);
+  }
+  root.append(unavailable);
+
+  const current = section('Courses currently in progress', 'Only ungraded enrollments in semesters that have started and have not ended appear here. These courses do not satisfy completed requirements.');
+  const enrollmentRows = list => list.map(c => [c.code, c.title, c.crn, c.credits, c.semester]);
+  const enrollmentColumns = ['Course', 'Title', 'CRN', 'Credits', 'Semester'];
+  current.append(auditTable('Current courses', enrollmentColumns, enrollmentRows(audit.in_progress), 'No current ungraded enrollments are recorded.'));
+  current.append(auditTable('Future registrations', enrollmentColumns, enrollmentRows(audit.future_registered), 'No future registrations are recorded.'));
+  root.append(current);
+
+  const outstanding = section('Outstanding graduation requirements', 'Graduation eligibility is unavailable. The list below identifies unmet stored major/minor course requirements only; other graduation rules still require confirmation.');
+  outstanding.append(auditTable('Unmet stored course requirements', ['Program', 'Type', 'Course', 'Minimum grade', 'Status'],
+    audit.outstanding.map(r => [r.program, r.kind, r.code, r.minimum_grade, r.status]),
+    'No unmet entries in the stored course lists. This does not establish graduation eligibility.'));
+  outstanding.append(el('p', 'muted audit-note', 'Still unverified: program credit targets, General Education, Liberal Arts, elective allocation, catalog year, residency, GPA, substitutions, repeat policies and any graduate thesis requirements.'));
+  root.append(outstanding);
+
+  if (audit.pending_records.length || audit.review.length) {
+    const review = section('Records needing review', 'These records are shown for clarification, without changing student data.');
+    review.append(auditTable('Record checks', ['Course / program', 'CRN', 'Semester', 'Reason'], [
+      ...audit.review.map(r => [r.code ?? '—', r.crn ?? '—', r.semester ?? '—', r.reason]),
+      ...audit.pending_records.map(r => [r.code, r.crn, r.semester, r.status]),
+    ], 'No record checks are pending.')); root.append(review);
+  }
+  const history = el('details', 'audit-section audit-history');
+  history.append(el('summary', 'audit-section-title', `Academic history · ${audit.credits.transcript_attempts} attempts · ${audit.credits.repeated_courses} repeated courses`));
+  history.append(el('p', 'muted audit-note', 'All transcript attempts are preserved. A repeated passing course contributes credits once; the highest recognized consistent grade is compared with each stored requirement minimum. Unknown grades need review.'));
+  const historyRows = list => list.map(h => [h.code, h.title, h.crn, h.credits, h.grade, h.semester, h.result]);
+  const historyColumns = ['Course', 'Title', 'CRN', 'Credits', 'Grade', 'Semester', 'Record result'];
+  history.append(auditTable('Transcript coursework', historyColumns, historyRows(audit.history), 'No academic history is recorded. A zero provisional total does not establish that no credits were earned elsewhere.'));
+  history.append(auditTable('Other Academic Coursework', historyColumns, historyRows(audit.other_coursework), 'No transcript coursework outside the stored major/minor course lists is recorded.'));
+  history.append(el('p', 'muted audit-note', 'Other Academic Coursework is not automatically assigned to General Education, Liberal Arts, or electives.'));
+  root.append(history);
+  return root;
+}
+
 function renderFlash({ ok, message, heading }) {
   const box = el('div', ok ? 'flash ok' : 'flash err');
   box.append(el('strong', null, heading || (ok ? 'Done' : 'Not allowed')), el('span', null, message));
@@ -78,6 +180,7 @@ function el(tag, className, text) {
 
 // onFilter: what a filter change does. By default it reloads the dashboard page with the new values.
 function renderBlock(block, viewId, onFilter = (params) => openView(viewId, params)) {
+  if (block.type === 'degree-audit') return renderDegreeAudit(block.audit);
   if (block.type === 'stats') {
     const grid = el('div', 'stats');
     for (const item of block.items) {

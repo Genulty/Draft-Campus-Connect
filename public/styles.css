@@ -343,3 +343,39 @@ button.ghost:hover { background: rgba(255,255,255,.08); }
   background: #fff1df;
   color: #965600;
 }
+
+/* Degree Audit: scoped layout, recorded course progress, and explicit policy gaps. */
+.degree-audit { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.audit-section { background: #fff; border: 1px solid #dfe5ef; border-radius: 12px; padding: 20px; min-width: 0; }
+.audit-section-title { margin: 0 0 12px; color: #1f3a68; font-size: 1.08rem; }
+.audit-note { font-size: .875rem; line-height: 1.55; margin: 12px 0; }
+.audit-student-name { margin: 0 0 18px; font-size: 1.4rem; font-weight: 600; color: #16213a; }
+.audit-profile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 18px 24px; margin: 0; }
+.audit-profile-grid dt { font-size: .78rem; color: #61718b; margin-bottom: 5px; }
+.audit-profile-grid dd { margin: 0; font-weight: 500; overflow-wrap: anywhere; }
+.audit-program { border: 1px solid #dfe5ef; border-radius: 10px; margin-top: 14px; overflow: hidden; min-width: 0; }
+.audit-program-heading { background: #f7f9fd; padding: 16px; display: flex; align-items: center; justify-content: space-between; gap: 14px; cursor: pointer; list-style: none; }
+.audit-program-heading::-webkit-details-marker { display: none; }
+.audit-program-heading > div { display: flex; flex-direction: column; gap: 5px; }
+.audit-program-heading strong { color: #1f3a68; }
+.audit-program-heading::after { content: '+'; font-size: 1.2rem; color: #1f3a68; }
+.audit-program[open] > .audit-program-heading::after { content: '−'; }
+.audit-state { display: inline-block; border-radius: 8px; background: #edf1f7; color: #45536b; padding: 6px 10px; font-size: .8rem; font-weight: 500; line-height: 1.4; }
+.audit-state-met { background: #e5f5eb; color: #176338; }
+.audit-progress { display: block; width: calc(100% - 32px); height: 10px; margin: 16px; accent-color: #2b5aa6; border: 0; border-radius: 8px; overflow: hidden; }
+.audit-progress::-webkit-progress-bar { background: #e7edf6; border-radius: 8px; }
+.audit-progress::-webkit-progress-value { background: #2b5aa6; border-radius: 8px; }
+.audit-program-note { font-size: .82rem; margin: 0 16px 14px; line-height: 1.5; }
+.audit-program .table-card { border: 0; border-top: 1px solid #dfe5ef; border-radius: 0; }
+.audit-unavailable-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.degree-audit .table-card + .table-card { margin-top: 14px; }
+.audit-history > summary { cursor: pointer; margin: 0; }
+.audit-history[open] > summary { margin-bottom: 16px; }
+@media (max-width: 640px) {
+  .audit-section { padding: 14px; }
+  .audit-unavailable-grid { grid-template-columns: 1fr; }
+  .audit-program-heading { flex-wrap: wrap; padding: 12px; }
+  .audit-program-heading > div { flex: 1 1 100%; }
+  .audit-program-heading .audit-state { flex: 1; }
+  .degree-audit .stats { grid-template-columns: 1fr; }
+}
