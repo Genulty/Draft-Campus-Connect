@@ -29,7 +29,9 @@ async function showDashboard(user) {
 
 let currentView = null;
 let currentParams = {};
+let viewRequestId = 0;
 async function openView(id, params = {}, flash = null) {
+  const requestId = ++viewRequestId;
   currentView = id;
   currentParams = params;
   document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === id));
@@ -38,9 +40,11 @@ async function openView(id, params = {}, flash = null) {
   const blocks = document.getElementById('page-blocks');
   blocks.innerHTML = '<p class="muted">Loading…</p>';
   const res = await fetch(`/api/views/${id}${qs ? `?${qs}` : ''}`);
+  // Ignore older responses when another lookup or filter request has started.
+  if (requestId !== viewRequestId) return;
   if (res.status === 401) return showLogin();
   const page = await res.json();
-  if (currentView !== id) return;
+  if (currentView !== id || requestId !== viewRequestId) return;
   document.getElementById('page-title').textContent = page.title || page.error;
   document.getElementById('page-subtitle').textContent = page.subtitle || '';
   blocks.replaceChildren(...(flash ? [renderFlash(flash)] : []), ...(page.blocks || []).map((b) => renderBlock(b, id)));

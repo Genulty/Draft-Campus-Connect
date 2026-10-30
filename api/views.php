@@ -1065,6 +1065,81 @@ function viewPrereqSearch(array $u, array $q): array
     return ['title' => 'Prerequisite search', 'subtitle' => 'See which courses you must pass first, and the minimum grade.', 'blocks' => $blocks];
 }
 
+// Admin-only lookup inside the existing account view. Uses the shared read-only form/table renderer.
+function adminStudentAccountBlocks(array $me, array $q): array
+{
+    if (($me['role'] ?? null) !== 'Admin') return [];
+
+    $raw = $q['student'] ?? '';
+    $term = is_string($raw) ? trim($raw) : '';
+    $blocks = [[
+        'type' => 'form', 'title' => 'Student account lookup', 'method' => 'view', 'submit' => 'View student',
+        'fields' => [['name' => 'student', 'label' => 'Student ID or campus email', 'value' => $term,
+            'placeholder' => '100001 or student@campus.edu']],
+        'note' => 'Read-only student information for administrators. Your account settings above apply only to you.',
+    ]];
+    if ($raw === '') return $blocks;
+    if (!is_string($raw) || $term === '' || strlen($term) > 254
+        || (ctype_digit($term) && filter_var($term, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 2147483647]]) === false)) {
+        $blocks[] = ['type' => 'message', 'ok' => false, 'heading' => 'Check the student lookup',
+            'message' => 'Enter a valid student ID or campus email.'];
+        return $blocks;
+    }
+
+    // Both identifiers are bound parameters. Only the trusted column fragment varies.
+    $column = ctype_digit($term) ? 's.student_ID' : 'l.user_Email';
+    $student = one("SELECT s.student_ID, s.student_Type, s.student_Year,
+        u.first_Name, u.middle_Name, u.last_Name, l.user_Email,
+        ug.undergraduate_Student_Type AS undergraduate_status,
+        g.graduate_Student_Type AS graduate_status,
+        ah.hold_ID AS academic_definition, ash.hold_ID AS academic_hold, ash.hold_Date AS academic_date,
+        dh.hold_ID AS disciplinary_definition, dsh.hold_ID AS disciplinary_hold, dsh.hold_Date AS disciplinary_date
+      FROM Student s
+      JOIN User u ON u.user_ID = s.student_ID
+      LEFT JOIN Login l ON l.user_ID = s.student_ID
+      LEFT JOIN Undergraduate_Student ug ON ug.student_ID = s.student_ID AND s.student_Type = 'Undergraduate'
+      LEFT JOIN Graduate_Student g ON g.student_ID = s.student_ID AND s.student_Type = 'Graduate'
+      LEFT JOIN Hold ah ON ah.hold_Type = 'Academic'
+      LEFT JOIN Student_Hold ash ON ash.student_ID = s.student_ID AND ash.hold_ID = ah.hold_ID
+      LEFT JOIN Hold dh ON dh.hold_Type = 'Disciplinary'
+      LEFT JOIN Student_Hold dsh ON dsh.student_ID = s.student_ID AND dsh.hold_ID = dh.hold_ID
+      WHERE $column = ?", [ctype_digit($term) ? (int) $term : $term]);
+    if (!$student) {
+        $blocks[] = ['type' => 'message', 'ok' => false, 'heading' => 'Student not found',
+            'message' => 'No student account matches that ID or campus email.'];
+        return $blocks;
+    }
+
+    $status = match ($student['student_Type']) {
+        'Undergraduate' => $student['undergraduate_status'],
+        'Graduate' => $student['graduate_status'],
+        default => null,
+    };
+    $status = in_array($status, ['Full-time', 'Part-time'], true) ? $status : 'Unknown / not on file';
+    $hold = static function (string $kind) use ($student): string {
+        if ($student[$kind . '_definition'] === null) return 'Unknown (hold type unavailable)';
+        return $student[$kind . '_hold'] === null ? 'No record on file' : 'Yes (record on file)';
+    };
+    $blocks[] = [
+        'type' => 'table', 'title' => 'Student Account Information',
+        'note' => 'Enrollment status comes from the student subtype record, not enrolled credits. Hold indicators report linked records only. The database has no resolved flag or end date, so current active/resolved status cannot be established separately.',
+        'columns' => ['Field', 'Value'],
+        'rows' => [
+            ['Student ID', $student['student_ID']],
+            ['Student name', trim(implode(' ', array_filter([$student['first_Name'], $student['middle_Name'], $student['last_Name']], static fn ($part) => $part !== null && $part !== '')))],
+            ['Campus email', $student['user_Email'] ?? 'Not on file'],
+            ['Student type', $student['student_Type']],
+            ['Student year', $student['student_Year']],
+            ['Enrollment status', $status],
+            ['Academic Hold', $hold('academic')],
+            ['Academic Hold placed on', $student['academic_date'] !== null ? shortDate($student['academic_date']) : '—'],
+            ['Disciplinary Hold', $hold('disciplinary')],
+            ['Disciplinary Hold placed on', $student['disciplinary_date'] !== null ? shortDate($student['disciplinary_date']) : '—'],
+        ],
+    ];
+    return $blocks;
+}
+
 // The signed-in user's own account: address (S-R20) and password (S-R21). The ID and email can't be changed (S-F14, S-F15).
 function viewAccount(array $me, array $q): array
 {
@@ -1080,6 +1155,7 @@ function viewAccount(array $me, array $q): array
             ['name' => 'zip_Code', 'label' => 'ZIP code', 'value' => $u['zip_Code'] ?? ''],
         ]],
         ...passwordChangeBlocks($me['id']),
+        ...adminStudentAccountBlocks($me, $q),
     ]];
 }
 
