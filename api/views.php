@@ -353,6 +353,23 @@ function viewMyPrograms(array $u, array $q): array
 
 // ---------------- Faculty ----------------
 
+// Lab records share their parent section's CRN and faculty assignment; they are not new sections.
+function facultyTeachingSchedule(int $facultyId, string $semesterId, string $semesterName): array
+{
+    return table("$semesterName teaching schedule", 'SELECT cs.meeting_Type AS Meeting, ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ', ' . SEATS . '
+      FROM (
+        SELECT CRN, course_ID, section_No, faculty_ID, time_Slot_ID, room_ID, semester_ID, available_Seats,
+          \'Lecture\' AS meeting_Type FROM Course_Section
+        UNION ALL
+        SELECT parent.CRN, parent.course_ID, parent.section_No, parent.faculty_ID, lab.time_Slot_ID,
+          lab.lab_ID AS room_ID, parent.semester_ID, parent.available_Seats, \'Lab\' AS meeting_Type
+        FROM Course_Section parent JOIN Course_Section_Lab lab ON lab.CRN = parent.CRN
+      ) cs ' . SECTION_JOINS . '
+      WHERE cs.faculty_ID = ? AND cs.semester_ID = ? ' . ORDER_BY_TIME . ', cs.CRN, cs.meeting_Type',
+        [$facultyId, $semesterId],
+        'Lecture and Lab are existing meetings of the same course section and share its CRN and recorded instructor. Open seats apply to the parent section.');
+}
+
 function viewTeaching(array $u, array $q): array
 {
     $f = one("SELECT f.`rank`, f.faculty_Type, f.specialty,
@@ -361,15 +378,21 @@ function viewTeaching(array $u, array $q): array
         CONCAT(ro.building_ID, '-', ro.room_No) AS office
       FROM Faculty f LEFT JOIN Room ro ON ro.room_ID = f.office_ID WHERE f.faculty_ID = ?", [$u['id']]);
     $cur = currentSemester();
-    $next = nextSemester();
+    $semesters = rows('SELECT semester_ID, semester_Name FROM Semester ORDER BY start_Date');
+    $selected = ['semester_ID' => $cur['id'], 'semester_Name' => $cur['name']];
+    foreach ($semesters as $semester) {
+        if ($semester['semester_ID'] === ($q['semester'] ?? null)) $selected = $semester;
+    }
     $advisees = one('SELECT COUNT(*) AS n FROM Advisor WHERE faculty_ID = ?', [$u['id']]);
     $mine = rows('SELECT cs.CRN, cs.course_ID FROM Course_Section cs WHERE cs.faculty_ID = ? AND cs.semester_ID = ? ORDER BY cs.CRN',
-        [$u['id'], $cur['id']]);
+        [$u['id'], $selected['semester_ID']]);
     $blocks = [
+        ['type' => 'filters', 'filters' => [['name' => 'semester', 'label' => 'Semester',
+            'value' => $selected['semester_ID'],
+            'options' => array_map(fn ($s) => [$s['semester_ID'], $s['semester_Name']], $semesters)]]],
         stats([['Rank', $f['rank']], ['Type', $f['faculty_Type']], ['Department(s)', $f['depts']], ['Office', $f['office']],
-            ["{$cur['name']} sections", count($mine)], ['Advisees', $advisees['n']]]),
-        table("{$cur['name']} teaching schedule", 'SELECT ' . SECTION_COLUMNS . ', ' . TIME_ROOM . ', ' . SEATS . ' FROM Course_Section cs ' . SECTION_JOINS . '
-          WHERE cs.faculty_ID = ? AND cs.semester_ID = ? ' . ORDER_BY_TIME, [$u['id'], $cur['id']]),
+            ["{$selected['semester_Name']} sections", count($mine)], ['Advisees', $advisees['n']]]),
+        facultyTeachingSchedule((int) $u['id'], $selected['semester_ID'], $selected['semester_Name']),
     ];
     foreach ($mine as $s) {
         $blocks[] = table("Roster: {$s['course_ID']} (CRN {$s['CRN']})", "SELECT u.user_ID AS `Student ID`,
@@ -379,10 +402,6 @@ function viewTeaching(array $u, array $q): array
           JOIN Login l ON l.user_ID = e.student_ID
           LEFT JOIN Attendance a ON a.CRN = e.CRN AND a.student_ID = e.student_ID
           WHERE e.CRN = ? GROUP BY u.user_ID, st.student_Year, l.user_Email ORDER BY u.last_Name", [$s['CRN']]);
-    }
-    if ($next) {
-        $blocks[] = table("{$next['name']} teaching schedule", 'SELECT ' . SECTION_COLUMNS . ', ' . TIME_ROOM . ' FROM Course_Section cs ' . SECTION_JOINS . '
-          WHERE cs.faculty_ID = ? AND cs.semester_ID = ? ' . ORDER_BY_TIME, [$u['id'], $next['id']]);
     }
     return ['title' => "Welcome, {$u['name']}", 'subtitle' => $f['specialty'] ? "Specialty: {$f['specialty']}" : '', 'blocks' => $blocks];
 }
