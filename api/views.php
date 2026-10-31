@@ -472,7 +472,7 @@ function viewCreateSection(array $u, array $q): array
     if (!$sems) return ['title' => 'Create a course section', 'subtitle' => 'There is no upcoming semester.', 'blocks' => []];
     $sem = $sems[0];
     foreach ($sems as $s) if ($s['semester_ID'] === ($q['semester'] ?? null)) $sem = $s;
-    $courses = rows('SELECT course_ID, course_Name FROM Course ORDER BY course_ID');
+    $courses = rows('SELECT course_ID, course_Name, course_Type, course_Credits FROM Course ORDER BY course_ID');
     $fac = rows("SELECT f.faculty_ID, CONCAT(u.first_Name, ' ', u.last_Name) AS name, f.faculty_Type,
         (SELECT GROUP_CONCAT(fd.dept_ID SEPARATOR '/') FROM Faculty_Department fd WHERE fd.faculty_ID = f.faculty_ID) AS depts,
         (SELECT COUNT(*) FROM Course_Section cs WHERE cs.faculty_ID = f.faculty_ID AND cs.semester_ID = ?) AS teaching
@@ -495,11 +495,11 @@ function viewCreateSection(array $u, array $q): array
     $v = fn (string $name, string $fallback) => isset($q[$name]) ? (string) $q[$name] : $fallback;
     return ['title' => 'Create a course section', 'blocks' => [
         ['type' => 'form', 'title' => "New section for {$sem['semester_Name']}", 'endpoint' => 'create-section', 'submit' => 'Create section', 'keep' => true,
-            'note' => 'Section capacity must be a whole number between 5 and 10 students.', 'fields' => [
+            'note' => 'Capacity: a whole number from 5 to 10 students. Undergraduate courses need at least two distinct meeting days; three-credit undergraduate courses need exactly two 80-minute meetings (160 minutes weekly). Four-credit undergraduate lecture/lab details remain unresolved; no duration or lab requirement is imposed here. Three-credit graduate courses may meet once for 180 minutes; graduate courses are not restricted to once-weekly schedules.', 'fields' => [
             ['name' => 'semester_ID', 'label' => 'Semester', 'value' => $sem['semester_ID'], 'reload' => 'semester',
                 'options' => array_map(fn ($x) => [$x['semester_ID'], $x['semester_Name']], $sems)],
             ['name' => 'course_ID', 'label' => 'Course', 'value' => $v('course_ID', 'CS455'),
-                'options' => array_map(fn ($c) => [$c['course_ID'], "{$c['course_ID']} {$c['course_Name']}"], $courses)],
+                'options' => array_map(fn ($c) => [$c['course_ID'], "{$c['course_ID']} {$c['course_Name']} ({$c['course_Type']}, {$c['course_Credits']} credits)"], $courses)],
             ['name' => 'faculty_ID', 'label' => 'Faculty', 'value' => $v('faculty_ID', ''),
                 'options' => array_merge([['', 'Choose…']], array_map(fn ($f) => [(string) $f['faculty_ID'],
                     "{$f['name']} ({$f['depts']}, {$f['faculty_Type']}, teaching {$f['teaching']} of " . ($f['faculty_Type'] === 'Full-time' ? 2 : 1) . ')'], $fac))],

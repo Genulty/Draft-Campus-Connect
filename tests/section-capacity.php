@@ -11,9 +11,9 @@ function one(string $sql, array $params = []): ?array
     $queries[] = $sql;
     if (str_contains($sql, 'FROM Admin')) return ['security_Level' => $scenario === 'readonly' ? 'Read-Only' : 'Read-Write'];
     if (str_contains($sql, 'FROM Semester')) return ['semester_ID' => 'TEST', 'semester_Name' => 'Fixture', 'started' => 0];
-    if (str_contains($sql, 'FROM Course WHERE')) return ['course_ID' => 'TEST101', 'course_Name' => 'Fixture', 'dept_ID' => 'TEST'];
+    if (str_contains($sql, 'FROM Course WHERE')) return array_merge(['course_ID' => 'TEST101', 'course_Name' => 'Fixture', 'dept_ID' => 'TEST', 'course_Type' => 'Undergraduate', 'course_Credits' => 3], $GLOBALS['courseOverride'] ?? []);
     if (str_contains($sql, 'FROM Faculty f')) return ['faculty_ID' => 1, 'faculty_Type' => 'Full-time', 'name' => 'Fixture Faculty'];
-    if (str_contains($sql, 'FROM Time_Slot WHERE')) return ['time_Slot_ID' => 1];
+    if (str_contains($sql, 'FROM Time_Slot WHERE')) return $scenario === 'missing-slot' ? null : ['time_Slot_ID' => $params[0]];
     if (str_contains($sql, 'FROM Room r')) return ['room_ID' => 'TEST', 'capacity' => $scenario === 'small-room' ? 4 : 10];
     if (str_contains($sql, 'FROM Faculty_Department')) return $scenario === 'department' ? null : ['ok' => 1];
     if (str_contains($sql, ' m WHERE')) {
@@ -28,6 +28,12 @@ function one(string $sql, array $params = []): ?array
 function rows(string $sql, array $params = []): array
 {
     global $scenario;
+    if (str_contains($sql, 'AS start_seconds')) return $GLOBALS['meetingOverride'] ?? [
+        ['day_ID' => 'M', 'period_ID' => 1, 'start_seconds' => 28800, 'end_seconds' => 33600],
+        ['day_ID' => 'W', 'period_ID' => 1, 'start_seconds' => 28800, 'end_seconds' => 33600],
+    ];
+    if (str_contains($sql, 'FROM Time_Slot ts')) return $GLOBALS['slotOptions'] ?? [];
+    if (str_contains($sql, 'FROM Course ORDER')) return $GLOBALS['courseOptions'] ?? [];
     if (str_contains($sql, 'FROM Semester')) return [['semester_ID' => 'TEST', 'semester_Name' => 'Fixture']];
     if (str_contains($sql, 'FROM Room r')) return [['room_ID' => 'TEST', 'building_Name' => 'Fixture', 'room_No' => '1', 'room_Type' => 'Lecture', 'capacity' => 10]];
     if (str_contains($sql, 'SELECT CRN FROM Course_Section') && str_contains($sql, 'faculty_ID') && $scenario === 'load') return [['CRN' => 1], ['CRN' => 2]];
@@ -61,13 +67,13 @@ foreach ($cases as $form) {
 }
 foreach ([5, 6, 9, 10, '5', '6', '9', '10'] as $value) {
     $inserts = [];
-    $result = createSection(1, ['max_Seats' => $value]);
+    $result = createSection(1, ['max_Seats' => $value, 'time_Slot_ID' => '1']);
     check(count($inserts) === 1 && $inserts[0][7] === (int) $value, 'Valid capacity was not passed as an integer');
     check(str_contains($result['message'], 'Created TEST101 section 001'), 'Existing creation response changed');
 }
 foreach (['readonly', 'small-room', 'department', 'load', 'faculty-conflict', 'room-conflict'] as $scenario) {
     $inserts = [];
-    try { createSection(1, ['max_Seats' => '5']); throw new RuntimeException("Existing guard failed: $scenario"); }
+    try { createSection(1, ['max_Seats' => '5', 'time_Slot_ID' => '1']); throw new RuntimeException("Existing guard failed: $scenario"); }
     catch (RuleError $e) { check($inserts === [], 'Existing guard allowed insert'); }
 }
 $scenario = '';
