@@ -28,11 +28,28 @@ function overlapsAny(string $column, int $count): string
         AND p1.start_Time < p2.end_Time AND p2.start_Time < p1.end_Time)";
 }
 
+// Every enrollment writer must lock this existing parent row before its first
+// ordinary SELECT. Locking reads do not establish a REPEATABLE READ snapshot, so
+// a waiter validates against a fresh snapshot after the prior writer finishes.
+// Order: Student first, then the existing section/enrollment locks. Keep this
+// discipline for future enrollment writers; previews must remain read-only.
+function lockStudentRegistration(int $studentId): void
+{
+    if (!db()->inTransaction()) {
+        throw new LogicException('Student registration locks require an active transaction.');
+    }
+    if (!one('SELECT student_ID FROM Student WHERE student_ID = ? FOR UPDATE', [$studentId])) {
+        fail('That student account does not exist.');
+    }
+}
+
 // ---------- Student: add a course section (S-R22, UC-24/25) ----------
 // Throws a RuleError naming the broken rule, or returns the section label if the student may add it.
-// $lock locks the section row so two students can't take the last seat at the same time.
+// $lock serializes this student first, then retains section locks for last-seat safety.
 function checkAdd(int $studentId, int $crn, bool $lock): string
 {
+    if ($lock) lockStudentRegistration($studentId);
+
     $sec = one("SELECT cs.*, c.course_Name, c.course_Credits, c.course_Type, s.semester_Name,
         CURDATE() BETWEEN s.add_Start AND s.add_End AS add_open, s.add_Start, s.add_End
       FROM Course_Section cs JOIN Course c ON c.course_ID = cs.course_ID JOIN Semester s ON s.semester_ID = cs.semester_ID
@@ -129,6 +146,7 @@ function addSection(int $studentId, int $crn): array
 function dropSection(int $studentId, int $crn): array
 {
     return transaction(function () use ($studentId, $crn) {
+        lockStudentRegistration($studentId);
         $row = one('SELECT e.grade, cs.course_ID, s.semester_Name, s.drop_Start, s.drop_End,
             CURDATE() BETWEEN s.drop_Start AND s.drop_End AS drop_open
           FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN JOIN Semester s ON s.semester_ID = cs.semester_ID
