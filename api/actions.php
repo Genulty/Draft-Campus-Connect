@@ -166,8 +166,13 @@ function createSection(int $adminId, array $form): array
         $admin = one('SELECT security_Level FROM Admin WHERE admin_ID = ?', [$adminId]);
         if (!$admin || $admin['security_Level'] !== 'Read-Write') fail('Read-Only admins cannot create course sections.');
 
-        $seats = filter_var($form['max_Seats'] ?? null, FILTER_VALIDATE_INT);
-        if ($seats === false || $seats < 1 || $seats > 10) fail('A section holds 1 to 10 students.');
+        $capacity = $form['max_Seats'] ?? null;
+        // Accept form strings and JSON integers, never coerced floats, booleans, or arrays.
+        if ((!is_int($capacity) && !is_string($capacity))
+            || !preg_match('/\A(?:[5-9]|10)\z/', (string) $capacity)) {
+            fail('Section capacity must be a whole number between 5 and 10 students.');
+        }
+        $seats = (int) $capacity;
         $sem = one('SELECT semester_ID, semester_Name, start_Date <= CURDATE() AS started FROM Semester WHERE semester_ID = ?',
             [(string) ($form['semester_ID'] ?? '')]);
         if (!$sem) fail('Choose a semester.');

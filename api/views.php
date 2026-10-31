@@ -466,7 +466,8 @@ function viewCreateSection(array $u, array $q): array
       ORDER BY r.room_ID");
     $v = fn (string $name, string $fallback) => isset($q[$name]) ? (string) $q[$name] : $fallback;
     return ['title' => 'Create a course section', 'blocks' => [
-        ['type' => 'form', 'title' => "New section for {$sem['semester_Name']}", 'endpoint' => 'create-section', 'submit' => 'Create section', 'keep' => true, 'fields' => [
+        ['type' => 'form', 'title' => "New section for {$sem['semester_Name']}", 'endpoint' => 'create-section', 'submit' => 'Create section', 'keep' => true,
+            'note' => 'Section capacity must be a whole number between 5 and 10 students.', 'fields' => [
             ['name' => 'semester_ID', 'label' => 'Semester', 'value' => $sem['semester_ID'], 'reload' => 'semester',
                 'options' => array_map(fn ($x) => [$x['semester_ID'], $x['semester_Name']], $sems)],
             ['name' => 'course_ID', 'label' => 'Course', 'value' => $v('course_ID', 'CS455'),
@@ -478,7 +479,7 @@ function viewCreateSection(array $u, array $q): array
                 'options' => array_map(fn ($t) => [(string) $t['id'], $t['label']], $slots)],
             ['name' => 'room_ID', 'label' => 'Room', 'value' => $v('room_ID', $rooms[0]['room_ID']),
                 'options' => array_map(fn ($r) => [$r['room_ID'], "{$r['building_Name']} {$r['room_No']} ({$r['room_Type']}, {$r['capacity']} seats)"], $rooms)],
-            ['name' => 'max_Seats', 'label' => 'Max seats', 'type' => 'number', 'min' => 1, 'max' => 10, 'value' => $v('max_Seats', '10')],
+            ['name' => 'max_Seats', 'label' => 'Max seats (5–10)', 'type' => 'number', 'min' => 5, 'max' => 10, 'step' => 1, 'required' => true, 'value' => $v('max_Seats', '10')],
         ]],
         table("Newest {$sem['semester_Name']} sections", 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ' FROM Course_Section cs ' . SECTION_JOINS . '
           WHERE cs.semester_ID = ? ORDER BY cs.CRN DESC LIMIT 5', [$sem['semester_ID']]),

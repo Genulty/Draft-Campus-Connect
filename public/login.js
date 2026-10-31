@@ -258,6 +258,8 @@ if (block.type === 'empty-major') {
         input.type = f.type || 'text';
         if (f.min !== undefined) input.min = f.min;
         if (f.max !== undefined) input.max = f.max;
+        if (f.step !== undefined) input.step = f.step;
+        if (f.required) input.required = true;
         input.value = f.value;
         if (f.placeholder) input.placeholder = f.placeholder;
         if (f.type === 'password') input.autocomplete = 'new-password';
