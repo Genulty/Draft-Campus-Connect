@@ -663,15 +663,27 @@ async function loadWelcome() {
 }
 
 // The public course explorer on the welcome page, with its semester and major filters.
+let publicScheduleRequestId = 0;
 async function loadPublicSchedule(params = {}) {
+  const requestId = ++publicScheduleRequestId;
   const box = document.getElementById('w-schedule');
+  // Keep the current filters usable, but clear courses from the previous selection immediately.
+  const filters = box.querySelector('.filters');
+  box.replaceChildren(...(filters ? [filters] : []), el('p', 'muted', 'Loading course options...'));
+  box.setAttribute('aria-busy', 'true');
   try {
     const res = await fetch(`/api/major-browser?${new URLSearchParams(params)}`);
+    if (requestId !== publicScheduleRequestId) return;
     if (!res.ok) throw new Error();
     const { blocks } = await res.json();
+    if (requestId !== publicScheduleRequestId) return;
     box.replaceChildren(...blocks.map((b) => renderBlock(b, null, loadPublicSchedule)));
   } catch {
-    box.replaceChildren(el('p', 'muted', 'The schedule could not be loaded. Please try again later.'));
+    if (requestId !== publicScheduleRequestId) return;
+    box.replaceChildren(...(filters ? [filters] : []),
+      el('p', 'muted', 'The schedule could not be loaded. Please try again later.'));
+  } finally {
+    if (requestId === publicScheduleRequestId) box.setAttribute('aria-busy', 'false');
   }
 }
 
