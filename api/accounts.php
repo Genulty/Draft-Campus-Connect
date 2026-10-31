@@ -1,6 +1,7 @@
 <?php
 // Sign-in and creating user accounts (admins only). Password resets by emailed code are in mail.php.
 declare(strict_types=1);
+require_once __DIR__ . '/security.php';
 
 const MAX_ATTEMPTS = 5;   // the account locks after 5 failed sign-in attempts
 const RESET_AFTER = 3;    // a password reset (emailed code) is offered after 3 failed sign-in attempts
@@ -15,50 +16,56 @@ function userInfo(int $id): array
 }
 
 // Finds a Login row by user ID (all digits) or by campus email.
-function findLogin(string $name, string $extraColumns = ''): ?array
+function findLogin(string $name, string $extraColumns = '', bool $lock = false): ?array
 {
     $column = ctype_digit($name) ? 'l.user_ID' : 'l.user_Email';
-    return one("SELECT l.*$extraColumns FROM Login l JOIN User u ON u.user_ID = l.user_ID WHERE $column = ?", [$name]);
+    return one("SELECT l.*$extraColumns FROM Login l JOIN User u ON u.user_ID = l.user_ID WHERE $column = ?" . ($lock ? ' FOR UPDATE' : ''), [$name]);
 }
 
 // ---------- Sign in (UC-1 successful login, UC-2 unsuccessful login) ----------
 // Returns [HTTP status, response body]. On success the user is stored in the session.
 function signIn(array $body): array
 {
-    $name = trim((string) ($body['email'] ?? ''));
-    $password = (string) ($body['password'] ?? '');
-    if ($name === '' || $password === '') return [400, ['error' => 'Enter your email (or ID) and password.']];
+    $result = transaction(function () use ($body) {
+        $name = is_string($body['email'] ?? null) ? trim($body['email']) : '';
+        $password = is_string($body['password'] ?? null) ? $body['password'] : '';
+        if ($name === '' || $password === '') return [400, ['error' => 'Enter your email (or ID) and password.']];
 
-    $login = findLogin($name);
-    if (!$login) return [401, ['error' => 'Invalid email or password.']];
-    if ($login['lock_Var']) {
-        return [423, ['error' => 'This account is locked after too many failed attempts. Reset your password to unlock it.', 'canReset' => true]];
+        $login = findLogin($name, '', true);
+        if (!$login) return [401, ['error' => 'Invalid email or password.']];
+        if ($login['lock_Var']) {
+            return [423, ['error' => 'This account is locked after too many failed attempts. Reset your password to unlock it.', 'canReset' => true]];
+        }
+
+        if (!password_verify($password, $login['user_Password'])) {
+            $tries = $login['no_Of_Tries'] + 1;
+            $locked = $tries >= MAX_ATTEMPTS ? 1 : 0;
+            run('UPDATE Login SET no_Of_Tries = ?, lock_Var = ? WHERE user_ID = ?', [$tries, $locked, $login['user_ID']]);
+            return [401, [
+                'error' => $locked
+                    ? 'Invalid email or password. The account is now locked.'
+                    : 'Invalid email or password. ' . (MAX_ATTEMPTS - $tries) . ' attempt(s) left before the account is locked.',
+                'canReset' => $tries >= RESET_AFTER,
+            ]];
+        }
+
+        // Each type of user signs in on its own page: the account must be the type chosen there.
+        $labels = ['Student' => 'Student', 'Faculty' => 'Faculty', 'Admin' => 'Admin', 'StatDept' => 'Stat-Dept member'];
+        $role = is_string($body['role'] ?? null) ? $body['role'] : '';
+        if (isset($labels[$role]) && $role !== $login['user_Type']) {
+            $article = $role === 'Admin' ? 'an' : 'a';
+            return [403, ['error' => "This is not $article {$labels[$role]} account. Choose {$labels[$login['user_Type']]} in \"Sign in as\" and try again."]];
+        }
+
+        run('UPDATE Login SET no_Of_Tries = 0 WHERE user_ID = ?', [$login['user_ID']]);
+        return [200, ['user' => userInfo($login['user_ID'])], credentialFingerprint($login['user_Password'])];
+    });
+    if ($result[0] === 200) {
+        clearAuthentication();
+        $_SESSION['user'] = $result[1]['user'];
+        $_SESSION['credential_fingerprint'] = $result[2];
     }
-
-    if (!password_verify($password, $login['user_Password'])) {
-        $tries = $login['no_Of_Tries'] + 1;
-        $locked = $tries >= MAX_ATTEMPTS ? 1 : 0;
-        run('UPDATE Login SET no_Of_Tries = ?, lock_Var = ? WHERE user_ID = ?', [$tries, $locked, $login['user_ID']]);
-        return [401, [
-            'error' => $locked
-                ? 'Invalid email or password. The account is now locked.'
-                : 'Invalid email or password. ' . (MAX_ATTEMPTS - $tries) . ' attempt(s) left before the account is locked.',
-            'canReset' => $tries >= RESET_AFTER,
-        ]];
-    }
-
-    // Each type of user signs in on its own page: the account must be the type chosen there.
-    $labels = ['Student' => 'Student', 'Faculty' => 'Faculty', 'Admin' => 'Admin', 'StatDept' => 'Stat-Dept member'];
-    $role = (string) ($body['role'] ?? '');
-    if (isset($labels[$role]) && $role !== $login['user_Type']) {
-        $article = $role === 'Admin' ? 'an' : 'a';
-        return [403, ['error' => "This is not $article {$labels[$role]} account. Choose {$labels[$login['user_Type']]} in \"Sign in as\" and try again."]];
-    }
-
-    run('UPDATE Login SET no_Of_Tries = 0 WHERE user_ID = ?', [$login['user_ID']]);
-    session_regenerate_id(true); // a fresh session ID on every sign-in
-    $_SESSION['user'] = userInfo($login['user_ID']);
-    return [200, ['user' => $_SESSION['user']]];
+    return [$result[0], $result[1]];
 }
 
 function checkPassword(mixed $password, mixed $confirm): void
@@ -181,23 +188,3 @@ function createUser(int $adminId, array $form): array
         return ['message' => "Created $label $first $last: ID $id, email $email. They can sign in with the password you set." . str_replace('your advisor', 'their advisor', $extra)];
     });
 }
-
-// Wrong answers on the demo mail screen (ID + date of birth) are counted in a small file so they
-// survive between requests: after 5, that account's mail is blocked for 15 minutes. The emailed
-// password-reset codes themselves are in mail.php.
-function verifyFailures(callable $update): array
-{
-    $file = sys_get_temp_dir() . '/campus-connect-reset-failures.json';
-    $handle = fopen($file, 'c+');
-    flock($handle, LOCK_EX);
-    $data = json_decode(stream_get_contents($handle) ?: '{}', true) ?: [];
-    $data = array_filter($data, fn ($entry) => $entry['until'] > time()); // forget expired entries
-    $result = $update($data);
-    ftruncate($handle, 0);
-    rewind($handle);
-    fwrite($handle, json_encode($data));
-    flock($handle, LOCK_UN);
-    fclose($handle);
-    return $result ?? [];
-}
-

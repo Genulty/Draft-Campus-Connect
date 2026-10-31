@@ -905,12 +905,16 @@ function viewAccount(array $me, array $q): array
 // password. Which step shows depends on what this browser has done so far (kept in the session).
 function passwordChangeBlocks(int $userId): array
 {
+    if (!function_exists('demoRecoveryEnabled') || !demoRecoveryEnabled()) {
+        return [['type' => 'message', 'ok' => false, 'heading' => 'Password recovery delivery unavailable',
+            'message' => 'Contact your administrator. Secure external delivery is not configured; the local-demo inbox is disabled.']];
+    }
     $pending = one('SELECT reset_ID FROM Password_Reset WHERE user_ID = ? AND purpose = \'Change\' AND used_At IS NULL
-      AND expires_At > NOW() ORDER BY reset_ID DESC LIMIT 1', [$userId]);
+      AND expires_At > NOW() AND attempts < ' . RESET_MAX_TRIES . ' ORDER BY reset_ID DESC LIMIT 1', [$userId]);
     $mine = ($_SESSION['reset_user'] ?? null) === $userId;
     $request = ['type' => 'form', 'title' => $pending && $mine ? 'Send a new code' : 'Change password', 'endpoint' => 'request-password-change',
-        'submit' => 'Email me a code', 'fields' => [['name' => 'current', 'label' => 'Current password', 'type' => 'password', 'value' => '']],
-        'note' => 'We email a 6-digit code to your campus inbox (see Inbox). It works for 15 minutes.'];
+        'submit' => 'Create local demo code', 'fields' => [['name' => 'current', 'label' => 'Current password', 'type' => 'password', 'value' => '']],
+        'note' => 'Local development only: a 6-digit code appears in your authenticated Inbox for 15 minutes. No real email is sent.'];
     if ($pending && $mine && ($_SESSION['reset_verified'] ?? null) === (int) $pending['reset_ID']) {
         return [['type' => 'form', 'title' => 'Choose a new password', 'endpoint' => 'complete-password-change', 'submit' => 'Save new password', 'fields' => [
             ['name' => 'password', 'label' => 'New password', 'type' => 'password', 'value' => ''],
@@ -937,11 +941,14 @@ function viewInbox(array $u, array $q): array
 // Admin: send a user a password-reset email (A-R6). The admin never sees or sets the new password.
 function viewResetPassword(array $u, array $q): array
 {
+    if (!function_exists('demoRecoveryEnabled') || !demoRecoveryEnabled()) {
+        return ['title' => 'Reset a password', 'blocks' => passwordChangeBlocks((int) $u['id'])];
+    }
     $level = one('SELECT security_Level FROM Admin WHERE admin_ID = ?', [$u['id']])['security_Level'];
     return ['title' => 'Reset a password', 'subtitle' => $level === 'Read-Write'
-            ? 'The user gets an email with a code and a link, and chooses the new password themselves.'
+            ? 'Local development only: a code and link appear in the owner’s authenticated Inbox; no real email is sent.'
             : 'You are a Read-Only admin, so sending a reset will be refused.', 'blocks' => [
-        ['type' => 'form', 'title' => 'Send a password reset', 'endpoint' => 'send-password-reset', 'submit' => 'Send reset email', 'fields' => [
+        ['type' => 'form', 'title' => 'Send a password reset', 'endpoint' => 'send-password-reset', 'submit' => 'Create local demo reset', 'fields' => [
             ['name' => 'login', 'label' => 'User email or ID', 'value' => '', 'placeholder' => 'student@campus.edu or 100001'],
         ], 'note' => 'The code and link work for 15 minutes. The reset is recorded in the audit log.'],
         table('Recent password resets', "SELECT CONCAT(u.first_Name, ' ', u.last_Name, ' (', r.user_ID, ')') AS User,

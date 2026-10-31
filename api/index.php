@@ -31,13 +31,16 @@ function respond(int $status, array $body): never
 // Unexpected errors: log the details for the server, show a plain message to the user.
 set_exception_handler(function (Throwable $e) {
     if ($e instanceof RuleError) respond(422, ['error' => $e->getMessage()]);
-    error_log('Campus Connect: ' . $e);
+    error_log('Campus Connect API error (' . get_class($e) . ')');
     respond(500, ['error' => 'Something went wrong. Please try again.']);
 });
 
 // Sessions: a cookie scripts can't read, kept for 8 hours, sent only over HTTPS when the site uses it.
 $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https';
 ini_set('session.gc_maxlifetime', '28800');
+ini_set('session.use_strict_mode', '1');
+ini_set('session.use_only_cookies', '1');
+ini_set('session.use_trans_sid', '0');
 session_name('campus_connect');
 session_set_cookie_params(['lifetime' => 28800, 'path' => '/', 'httponly' => true, 'samesite' => 'Lax', 'secure' => $https]);
 session_start();
@@ -49,8 +52,9 @@ $user = $_SESSION['user'] ?? null;
 
 function requireUser(?array $user): array
 {
-    if (!$user) respond(401, ['error' => 'Not logged in.']);
-    return $user;
+    $validated = authenticatedSession($user);
+    if (!$validated) respond(401, ['error' => 'Sign in again to continue.']);
+    return $validated;
 }
 
 // ---------- Routes ----------
@@ -88,7 +92,7 @@ switch (true) {
     case $method === 'POST' && $path === '/api/reset/complete':
         respond(200, finishReset($body));
 
-    // Campus mail for signed-out users (opened with ID + date of birth): this is a demo, mail is not really sent.
+    // Local-demo mail requires an authenticated owner; ID/DOB never authorize access.
     case $method === 'POST' && $path === '/api/demo-mail':
         respond(200, demoMail($body));
 

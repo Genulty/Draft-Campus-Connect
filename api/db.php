@@ -22,6 +22,7 @@ function config(): array
         $config = [
             'host' => $fromFile['host'] ?? (getenv('DB_HOST') ?: '127.0.0.1'),
             'port' => (int) ($fromFile['port'] ?? (getenv('DB_PORT') ?: 3306)),
+            'socket' => $fromFile['socket'] ?? (getenv('DB_SOCKET') ?: '/tmp/mysql.sock'),
             'user' => $fromFile['user'] ?? (getenv('DB_USER') ?: 'campus'),
             'password' => $fromFile['password'] ?? (getenv('DB_PASSWORD') !== false ? getenv('DB_PASSWORD') : 'campus'),
             'database' => $fromFile['database'] ?? (getenv('DB_NAME') ?: 'campus_connect'),
@@ -38,7 +39,7 @@ function db(): PDO
         $c = config();
 
         $dsn = $c['host'] === 'localhost'
-            ? "mysql:unix_socket=/tmp/mysql.sock;dbname={$c['database']};charset=utf8mb4"
+            ? "mysql:unix_socket={$c['socket']};dbname={$c['database']};charset=utf8mb4"
             : "mysql:host={$c['host']};port={$c['port']};dbname={$c['database']};charset=utf8mb4";
 
         $pdo = new PDO(

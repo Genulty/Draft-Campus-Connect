@@ -190,6 +190,11 @@ async function runAction(endpoint, body) {
   });
   if (res.status === 401) return showLogin();
   const data = await res.json();
+  if (res.ok && endpoint === 'complete-password-change') {
+    showLogin();
+    message.replaceChildren(el('div', 'notice', data.message));
+    return;
+  }
   await openView(currentView, currentParams, res.ok ? { ok: true, message: data.message } : { ok: false, message: data.error }, 'replace');
   document.querySelector('.content').scrollIntoView({ behavior: 'smooth' });
 }
@@ -535,7 +540,6 @@ function onSubmit(formEl, box, send, done) {
 const resetForm = document.getElementById('reset-form');
 const codeForm = document.getElementById('code-form');
 const newpassForm = document.getElementById('newpass-form');
-const mailForm = document.getElementById('mail-form');
 let resetLogin = '';
 function openReset(login) {
   resetForm.reset();
@@ -589,17 +593,10 @@ onSubmit(newpassForm, document.getElementById('newpass-message'), (body) => post
   form.password.focus();
 });
 
-// Campus mail (demo) for signed-out users
+// Recovery information never asks for ID/DOB or opens an unauthenticated inbox.
 document.getElementById('open-mail').addEventListener('click', (e) => {
   e.preventDefault();
-  mailForm.reset();
-  document.getElementById('mail-message').replaceChildren();
-  document.getElementById('mail-list').replaceChildren();
   showAuthView('mail-view');
-  mailForm.user_ID.focus();
-});
-onSubmit(mailForm, document.getElementById('mail-message'), (body) => postJson('/api/demo-mail', body), (data) => {
-  document.getElementById('mail-list').replaceChildren(renderMail(data.messages));
 });
 
 // The emailed link (#reset?token=...) skips the code and goes straight to choosing a new password.
@@ -613,8 +610,8 @@ async function openResetLink(token) {
     showBox(document.getElementById('reset-message'), 'error', data.error);
     return;
   }
-  resetLogin = data.email;
-  showNewPasswordStep(`For ${data.email}. At least 8 characters, with a letter and a number.`);
+  resetLogin = data.email || '';
+  showNewPasswordStep('Verification accepted. At least 8 characters, with a letter and a number.');
 }
 window.addEventListener('hashchange', () => {
   const token = new URLSearchParams(location.hash.split('?')[1] || '').get('token');
