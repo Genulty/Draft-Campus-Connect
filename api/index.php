@@ -115,8 +115,8 @@ switch (true) {
         ];
         if (!in_array($user['role'], $allowed[$m[1]] ?? [], true)) respond(403, ['error' => 'Your role cannot do that.']);
         respond(200, match ($m[1]) {
-            'add-section' => addSection($user['id'], (int) ($body['CRN'] ?? 0)),
-            'drop-section' => dropSection($user['id'], (int) ($body['CRN'] ?? 0)),
+            'add-section' => addSection($user['id'], registrationCrn($body['CRN'] ?? null)),
+            'drop-section' => dropSection($user['id'], registrationCrn($body['CRN'] ?? null)),
             'add-major' => addMajor($user['id'], $body),
             'change-major' => changeMajor($user['id'], $body),
             'drop-major' => dropMajor($user['id'], $body),

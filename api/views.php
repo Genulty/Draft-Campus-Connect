@@ -191,14 +191,21 @@ function viewHoldsAdvisors(array $u, array $q): array
     ]];
 }
 
-// Registration (S-R22, S-R23): add and drop sections for a semester whose add period is open.
+// Registration (S-R22, S-R23): a semester is accessible while either window is open.
 function viewRegister(array $u, array $q): array
 {
-    $open = rows('SELECT semester_ID, semester_Name, add_Start, add_End, drop_Start, drop_End FROM Semester
-      WHERE CURDATE() BETWEEN add_Start AND add_End ORDER BY start_Date');
-    if (!$open) return ['title' => 'Register', 'subtitle' => 'No semester is open for registration right now.', 'blocks' => []];
+    $open = rows('SELECT semester_ID, semester_Name, add_Start, add_End, drop_Start, drop_End,
+        CURDATE() BETWEEN add_Start AND add_End AS add_open,
+        CURDATE() BETWEEN drop_Start AND drop_End AS drop_open FROM Semester
+      WHERE (CURDATE() BETWEEN add_Start AND add_End)
+         OR (CURDATE() BETWEEN drop_Start AND drop_End) ORDER BY start_Date');
+    if (!$open) return ['title' => 'Register', 'subtitle' => 'No semester is open for adding or dropping right now.', 'blocks' => []];
     $sem = end($open);
     foreach ($open as $o) if ($o['semester_ID'] === ($q['semester'] ?? null)) $sem = $o;
+    $addOpen = (bool) $sem['add_open'];
+    $dropOpen = (bool) $sem['drop_open'];
+    $status = !$addOpen ? 'Registration closed — drops still permitted.'
+        : ($dropOpen ? 'Adding and dropping are permitted.' : 'Adding permitted — drop period closed.');
     $depts = departments();
     $me = one('SELECT COALESCE(ug.dept_ID, g.dept_ID) AS dept, COALESCE(ug.undergraduate_Student_Type, g.graduate_Student_Type) AS load_type,
         s.student_Type FROM Student s LEFT JOIN Undergraduate_Student ug ON ug.student_ID = s.student_ID
@@ -210,7 +217,8 @@ function viewRegister(array $u, array $q): array
       WHERE sh.student_ID = ?", [$u['id']]);
 
     $mine = studentSchedule("My {$sem['semester_Name']} registration", $u['id'], $sem['semester_ID']);
-    $mine['action'] = ['label' => 'Drop', 'endpoint' => 'drop-section', 'column' => 'CRN', 'style' => 'danger'];
+    $mine['action'] = ['label' => 'Drop', 'endpoint' => 'drop-section', 'column' => 'CRN', 'style' => 'danger', 'disabled' => !$dropOpen];
+    if (!$dropOpen) $mine['note'] = 'The drop period is closed. Existing registrations cannot be dropped.';
     $offered = table('Sections you can add', 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ', ' . SEATS . ",
         COALESCE((SELECT GROUP_CONCAT(cp.prerequisite_Course_ID SEPARATOR ', ') FROM Course_Prerequisite cp WHERE cp.course_ID = c.course_ID), '—') AS Prerequisites
       FROM Course_Section cs " . SECTION_JOINS . '
@@ -229,13 +237,14 @@ function viewRegister(array $u, array $q): array
         if ($reason === null) $canAdd[] = $row;
         else $cannot[] = [...array_map(fn ($k) => $row[$k], $keep), $reason];
     }
-    $available = array_merge($offered, ['rows' => $canAdd, 'action' => ['label' => 'Add', 'endpoint' => 'add-section', 'column' => 'CRN']]);
+    $available = array_merge($offered, ['rows' => $canAdd, 'action' => ['label' => 'Add', 'endpoint' => 'add-section', 'column' => 'CRN', 'disabled' => !$addOpen]]);
     $blocked = ['type' => 'table', 'title' => "Sections you can't add",
-        'note' => 'Each one breaks a registration rule. Try sends the request anyway, so you can see it refused.',
+        'note' => $addOpen ? 'Each one breaks a registration rule. Try sends the request anyway, so you can see it refused.'
+            : 'The add period is closed. These sections cannot be added.',
         'columns' => [...array_map(fn ($k) => $offered['columns'][$k], $keep), 'Reason'], 'rows' => $cannot,
-        'action' => ['label' => 'Try', 'endpoint' => 'add-section', 'column' => 'CRN', 'style' => 'secondary']];
+        'action' => ['label' => 'Try', 'endpoint' => 'add-section', 'column' => 'CRN', 'style' => 'secondary', 'disabled' => !$addOpen]];
 
-    return ['title' => "Register for {$sem['semester_Name']}", 'subtitle' => 'Add and drop course sections.', 'blocks' => [
+    return ['title' => "Register for {$sem['semester_Name']}", 'subtitle' => $status, 'blocks' => [
         ['type' => 'filters', 'filters' => [
             ['name' => 'semester', 'label' => 'Semester', 'value' => $sem['semester_ID'],
                 'options' => array_map(fn ($x) => [$x['semester_ID'], $x['semester_Name']], $open)],

@@ -43,6 +43,17 @@ function lockStudentRegistration(int $studentId): void
     }
 }
 
+// Validate API section identifiers without accepting PHP's lossy integer casts.
+function registrationCrn(mixed $value): int
+{
+    if ((!is_int($value) && !is_string($value))
+        || !preg_match('/\A[1-9][0-9]*\z/', (string) $value)
+        || filter_var($value, FILTER_VALIDATE_INT) === false) {
+        fail('Choose a valid course section (CRN).');
+    }
+    return (int) $value;
+}
+
 // ---------- Student: add a course section (S-R22, UC-24/25) ----------
 // Throws a RuleError naming the broken rule, or returns the section label if the student may add it.
 // $lock serializes this student first, then retains section locks for last-seat safety.

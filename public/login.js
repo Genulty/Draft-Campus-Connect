@@ -377,7 +377,9 @@ item.append(availability);
       const td = el('td');
       const btn = el('button', `row-action ${block.action.style || ''}`, block.action.label);
       btn.type = 'button';
+      btn.disabled = Boolean(block.action.disabled);
       btn.addEventListener('click', () => {
+        if (block.action.disabled) return;
         btn.disabled = true;
         runAction(block.action.endpoint, { [block.action.column]: row[keyIndex] });
       });
