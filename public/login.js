@@ -23,20 +23,34 @@ async function showDashboard(user) {
     a.dataset.view = v.id;
     return a;
   }));
-  const wanted = location.hash.slice(1).split('?')[0];
-  openView(views.some((v) => v.id === wanted) ? wanted : views[0].id);
+  return openDashboardLocation();
 }
 
 let currentView = null;
 let currentParams = {};
 let viewRequestId = 0;
-async function openView(id, params = {}, flash = null) {
+// Hash parameters are data for the view; the role-specific navigation decides which view may open.
+function openDashboardLocation() {
+  const hash = location.hash.slice(1);
+  const separator = hash.indexOf('?');
+  const id = separator < 0 ? hash : hash.slice(0, separator);
+  const params = Object.fromEntries(new URLSearchParams(separator < 0 ? '' : hash.slice(separator + 1)));
+  const links = [...document.querySelectorAll('#nav a[data-view]')];
+  const wanted = links.find((a) => a.dataset.view === id);
+  const target = wanted || links[0];
+  if (target) return openView(target.dataset.view, wanted ? params : {}, null, 'replace');
+}
+
+async function openView(id, params = {}, flash = null, historyMode = 'push') {
   const requestId = ++viewRequestId;
   currentView = id;
   currentParams = params;
   document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === id));
   const qs = new URLSearchParams(params).toString();
-  history.replaceState(null, '', `#${id}${qs ? `?${qs}` : ''}`);
+  const hash = `#${id}${qs ? `?${qs}` : ''}`;
+  if (location.hash !== hash) {
+    history[historyMode === 'replace' ? 'replaceState' : 'pushState'](null, '', hash);
+  }
   const blocks = document.getElementById('page-blocks');
   blocks.innerHTML = '<p class="muted">Loading…</p>';
   const res = await fetch(`/api/views/${id}${qs ? `?${qs}` : ''}`);
@@ -45,6 +59,15 @@ async function openView(id, params = {}, flash = null) {
   if (res.status === 401) return showLogin();
   const page = await res.json();
   if (currentView !== id || requestId !== viewRequestId) return;
+  // Use the server-validated Master Schedule choices for refreshes and future filter changes.
+  if (id === 'master-schedule' && res.ok) {
+    const filters = (page.blocks || []).find((b) => b.type === 'filters')?.filters || [];
+    const choices = filters.filter((f) => f.name === 'semester' || f.name === 'dept');
+    if (choices.length === 2) {
+      currentParams = Object.fromEntries(choices.map((f) => [f.name, f.value]));
+      history.replaceState(null, '', `#${id}?${new URLSearchParams(currentParams)}`);
+    }
+  }
   document.getElementById('page-title').textContent = page.title || page.error;
   document.getElementById('page-subtitle').textContent = page.subtitle || '';
   blocks.replaceChildren(...(flash ? [renderFlash(flash)] : []), ...(page.blocks || []).map((b) => renderBlock(b, id)));
@@ -167,7 +190,7 @@ async function runAction(endpoint, body) {
   });
   if (res.status === 401) return showLogin();
   const data = await res.json();
-  await openView(currentView, currentParams, res.ok ? { ok: true, message: data.message } : { ok: false, message: data.error });
+  await openView(currentView, currentParams, res.ok ? { ok: true, message: data.message } : { ok: false, message: data.error }, 'replace');
   document.querySelector('.content').scrollIntoView({ behavior: 'smooth' });
 }
 
@@ -595,7 +618,8 @@ async function openResetLink(token) {
 }
 window.addEventListener('hashchange', () => {
   const token = new URLSearchParams(location.hash.split('?')[1] || '').get('token');
-  if (location.hash.startsWith('#reset?') && token) openResetLink(token);
+  if (location.hash.startsWith('#reset?') && token) return openResetLink(token);
+  if (!dashboardPage.hidden) openDashboardLocation();
 });
 
 // Emails, newest first. A reset link in the text becomes clickable.
