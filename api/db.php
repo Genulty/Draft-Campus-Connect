@@ -26,6 +26,7 @@ function config(): array
             'user' => $fromFile['user'] ?? (getenv('DB_USER') ?: 'campus'),
             'password' => $fromFile['password'] ?? (getenv('DB_PASSWORD') !== false ? getenv('DB_PASSWORD') : 'campus'),
             'database' => $fromFile['database'] ?? (getenv('DB_NAME') ?: 'campus_connect'),
+            'campus_mail_recovery' => ($fromFile['campus_mail_recovery'] ?? false) === true,
         ];
     }
     return $config;

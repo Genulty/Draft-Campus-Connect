@@ -74,6 +74,8 @@ return [
     'user' => 'campus',
     'password' => '$DB_PASSWORD',
     'database' => 'campus_connect',
+    // Password reset/change by a code sent to campus mail (the Inbox page).
+    'campus_mail_recovery' => true,
 ];
 PHP
 chown root:www-data "$CONFIG_FILE"
