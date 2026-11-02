@@ -3,6 +3,9 @@
 declare(strict_types=1);
 function demoRecoveryEnabled(): bool
 {
+    // The class server turns campus-mail recovery on in /etc/campus-connect/config.php
+    // ('campus_mail_recovery' => true, written by deploy/lightsail-setup.sh).
+    if ((config()['campus_mail_recovery'] ?? false) === true) return true;
     return getenv('APP_ENV') === 'development' && getenv('CAMPUS_DEMO_RECOVERY') === '1'
         && (PHP_SAPI === 'cli' || (PHP_SAPI === 'cli-server'
             && in_array($_SERVER['REMOTE_ADDR'] ?? '', ['127.0.0.1','::1'], true)));
