@@ -28,10 +28,19 @@ function nextSemester(): array
     return one('SELECT semester_ID AS id, semester_Name AS name FROM Semester WHERE start_Date > CURDATE() ORDER BY start_Date LIMIT 1') ?? [];
 }
 
-// Columns shared by every list of course sections. No Credits column (degree audit and the
-// registration credit-limit stat are where credits actually matter); Instructor sits between
-// Days and Time when a view includes it (TIME_ROOM is the tail every view ends with).
+// Display the existing course-number convention without changing registration rules.
+// Graduate classification comes from course_Type; unfamiliar undergraduate codes stay unclassified.
+const COURSE_LEVEL = "CASE
+  WHEN c.course_Type = 'Graduate' THEN 'Graduate'
+  WHEN c.course_Type = 'Undergraduate' AND c.course_ID REGEXP '^[A-Za-z]+[1-4][0-9]{2,3}$'
+    THEN CASE LEFT(REGEXP_SUBSTR(c.course_ID, '[0-9]+'), 1)
+      WHEN '1' THEN 'Freshman' WHEN '2' THEN 'Sophomore'
+      WHEN '3' THEN 'Junior' WHEN '4' THEN 'Senior' END
+  ELSE 'Unclassified' END";
+
+// Columns shared by course-section lists, including the credits used by the major browser.
 const SECTION_COLUMNS = "cs.CRN, cs.course_ID AS Course, c.course_Name AS Title, cs.section_No AS Section,
+  c.course_Credits AS Credits, " . COURSE_LEVEL . " AS Level,
   (SELECT GROUP_CONCAT(d.day_ID ORDER BY FIELD(d.day_ID,'M','T','W','R','F') SEPARATOR '')
      FROM Time_Slot_Day d WHERE d.time_Slot_ID = cs.time_Slot_ID) AS Days";
 const TIME_ROOM = "CONCAT(TIME_FORMAT(p.start_Time, '%l:%i %p'), ' – ', TIME_FORMAT(p.end_Time, '%l:%i %p')) AS Time,
@@ -182,14 +191,21 @@ function viewHoldsAdvisors(array $u, array $q): array
     ]];
 }
 
-// Registration (S-R22, S-R23): add and drop sections for a semester whose add period is open.
+// Registration (S-R22, S-R23): a semester is accessible while either window is open.
 function viewRegister(array $u, array $q): array
 {
-    $open = rows('SELECT semester_ID, semester_Name, add_Start, add_End, drop_Start, drop_End FROM Semester
-      WHERE CURDATE() BETWEEN add_Start AND add_End ORDER BY start_Date');
-    if (!$open) return ['title' => 'Register', 'subtitle' => 'No semester is open for registration right now.', 'blocks' => []];
+    $open = rows('SELECT semester_ID, semester_Name, add_Start, add_End, drop_Start, drop_End,
+        CURDATE() BETWEEN add_Start AND add_End AS add_open,
+        CURDATE() BETWEEN drop_Start AND drop_End AS drop_open FROM Semester
+      WHERE (CURDATE() BETWEEN add_Start AND add_End)
+         OR (CURDATE() BETWEEN drop_Start AND drop_End) ORDER BY start_Date');
+    if (!$open) return ['title' => 'Register', 'subtitle' => 'No semester is open for adding or dropping right now.', 'blocks' => []];
     $sem = end($open);
     foreach ($open as $o) if ($o['semester_ID'] === ($q['semester'] ?? null)) $sem = $o;
+    $addOpen = (bool) $sem['add_open'];
+    $dropOpen = (bool) $sem['drop_open'];
+    $status = !$addOpen ? 'Registration closed — drops still permitted.'
+        : ($dropOpen ? 'Adding and dropping are permitted.' : 'Adding permitted — drop period closed.');
     $depts = departments();
     $me = one('SELECT COALESCE(ug.dept_ID, g.dept_ID) AS dept, COALESCE(ug.undergraduate_Student_Type, g.graduate_Student_Type) AS load_type,
         s.student_Type FROM Student s LEFT JOIN Undergraduate_Student ug ON ug.student_ID = s.student_ID
@@ -201,7 +217,8 @@ function viewRegister(array $u, array $q): array
       WHERE sh.student_ID = ?", [$u['id']]);
 
     $mine = studentSchedule("My {$sem['semester_Name']} registration", $u['id'], $sem['semester_ID']);
-    $mine['action'] = ['label' => 'Drop', 'endpoint' => 'drop-section', 'column' => 'CRN', 'style' => 'danger'];
+    $mine['action'] = ['label' => 'Drop', 'endpoint' => 'drop-section', 'column' => 'CRN', 'style' => 'danger', 'disabled' => !$dropOpen];
+    if (!$dropOpen) $mine['note'] = 'The drop period is closed. Existing registrations cannot be dropped.';
     $offered = table('Sections you can add', 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ', ' . SEATS . ",
         COALESCE((SELECT GROUP_CONCAT(cp.prerequisite_Course_ID SEPARATOR ', ') FROM Course_Prerequisite cp WHERE cp.course_ID = c.course_ID), '—') AS Prerequisites
       FROM Course_Section cs " . SECTION_JOINS . '
@@ -220,13 +237,14 @@ function viewRegister(array $u, array $q): array
         if ($reason === null) $canAdd[] = $row;
         else $cannot[] = [...array_map(fn ($k) => $row[$k], $keep), $reason];
     }
-    $available = array_merge($offered, ['rows' => $canAdd, 'action' => ['label' => 'Add', 'endpoint' => 'add-section', 'column' => 'CRN']]);
+    $available = array_merge($offered, ['rows' => $canAdd, 'action' => ['label' => 'Add', 'endpoint' => 'add-section', 'column' => 'CRN', 'disabled' => !$addOpen]]);
     $blocked = ['type' => 'table', 'title' => "Sections you can't add",
-        'note' => 'Each one breaks a registration rule. Try sends the request anyway, so you can see it refused.',
+        'note' => $addOpen ? 'Each one breaks a registration rule. Try sends the request anyway, so you can see it refused.'
+            : 'The add period is closed. These sections cannot be added.',
         'columns' => [...array_map(fn ($k) => $offered['columns'][$k], $keep), 'Reason'], 'rows' => $cannot,
-        'action' => ['label' => 'Try', 'endpoint' => 'add-section', 'column' => 'CRN', 'style' => 'secondary']];
+        'action' => ['label' => 'Try', 'endpoint' => 'add-section', 'column' => 'CRN', 'style' => 'secondary', 'disabled' => !$addOpen]];
 
-    return ['title' => "Register for {$sem['semester_Name']}", 'subtitle' => 'Add and drop course sections.', 'blocks' => [
+    return ['title' => "Register for {$sem['semester_Name']}", 'subtitle' => $status, 'blocks' => [
         ['type' => 'filters', 'filters' => [
             ['name' => 'semester', 'label' => 'Semester', 'value' => $sem['semester_ID'],
                 'options' => array_map(fn ($x) => [$x['semester_ID'], $x['semester_Name']], $open)],
@@ -274,49 +292,16 @@ function viewGrades(array $u, array $q): array
     ]];
 }
 
-// Degree audit (S-R9): every required course of each major and minor, and where the student stands on it.
+// Degree audit (S-R9): use only the signed-in student's records and stored program requirements.
+require_once __DIR__ . '/degree-audit.php';
 function viewDegreeAudit(array $u, array $q): array
 {
-    $programs = rows("SELECT 'Major' AS kind, m.major_ID AS id, m.major_Name AS name FROM Student_Major sm
-        JOIN Major m ON m.major_ID = sm.major_ID JOIN Student s ON s.student_ID = sm.student_ID
-        WHERE sm.student_ID = ? ORDER BY sm.major_ID = s.major_ID DESC", [$u['id']]);
-    foreach (rows("SELECT 'Minor' AS kind, n.minor_ID AS id, n.minor_Name AS name FROM Student_Minor sm
-        JOIN Minor n ON n.minor_ID = sm.minor_ID WHERE sm.student_ID = ?", [$u['id']]) as $n) $programs[] = $n;
-    $cur = currentSemester();
-    $next = nextSemester();
-    $summary = [];
-    $blocks = [];
-    foreach ($programs as $p) {
-        $table = $p['kind'] === 'Major' ? 'Major_Course_Requirement' : 'Minor_Course_Requirement';
-        $key = $p['kind'] === 'Major' ? 'major_ID' : 'minor_ID';
-        // Best grade earned in each required course, and whether the student is taking it now or next semester.
-        $reqs = rows("SELECT c.course_ID, c.course_Name, c.course_Credits, r.min_Grade_Req,
-            (SELECT h.grade FROM Student_History h WHERE h.student_ID = ? AND h.course_ID = c.course_ID
-              ORDER BY FIELD(h.grade, " . GRADE_ORDER . ") DESC LIMIT 1) AS best,
-            (SELECT GROUP_CONCAT(sem.semester_Name ORDER BY sem.start_Date DESC) FROM Student_History h JOIN Semester sem ON sem.semester_ID = h.semester_ID
-              WHERE h.student_ID = ? AND h.course_ID = c.course_ID) AS taken,
-            (SELECT cs.semester_ID FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN
-              WHERE e.student_ID = ? AND cs.course_ID = c.course_ID AND cs.semester_ID IN (?, ?) LIMIT 1) AS enrolled
-          FROM $table r JOIN Course c ON c.course_ID = r.course_ID WHERE r.$key = ? ORDER BY c.course_ID",
-            [$u['id'], $u['id'], $u['id'], $cur['id'] ?? '', $next['id'] ?? '', $p['id']]);
-        $order = explode(',', str_replace("'", '', GRADE_ORDER));
-        $done = 0;
-        $rows = [];
-        foreach ($reqs as $r) {
-            $met = $r['best'] !== null && array_search($r['best'], $order, true) >= array_search($r['min_Grade_Req'], $order, true);
-            if ($met) { $status = 'Completed'; $done++; }
-            elseif ($r['enrolled'] === ($cur['id'] ?? null)) $status = 'In progress';
-            elseif ($r['enrolled'] !== null) $status = 'Registered for ' . $next['name'];
-            elseif ($r['best'] !== null) $status = 'Grade below minimum';
-            else $status = 'Not started';
-            $rows[] = [$r['course_ID'], $r['course_Name'], $r['course_Credits'], $r['min_Grade_Req'], $r['best'] ?? '—', $r['taken'] ?? '—', $status];
-        }
-        $summary[] = [$p['name'], count($reqs) ? "$done of " . count($reqs) . ' courses' : 'No requirements'];
-        $blocks[] = ['type' => 'table', 'title' => "{$p['kind']}: {$p['name']}", 'note' => null,
-            'columns' => ['Course', 'Title', 'Credits', 'Minimum grade', 'Your grade', 'Taken', 'Status'], 'rows' => $rows];
-    }
-    return ['title' => 'Degree audit', 'subtitle' => 'Required courses for each of your programs. A course counts once you earn at least its minimum grade.',
-        'blocks' => [stats($summary), ...$blocks]];
+    $audit = loadDegreeAudit((int) $u['id']);
+    return ['title' => 'Degree audit',
+        'subtitle' => 'Recorded academic progress. Unconfigured graduation rules remain unavailable.',
+        'blocks' => $audit === null
+            ? [['type' => 'message', 'ok' => false, 'heading' => 'Academic profile unavailable', 'message' => 'No student academic profile is recorded for this account.']]
+            : [['type' => 'degree-audit', 'audit' => $audit]]];
 }
 
 // A student's majors and minors, with the forms to declare, change and drop them (S-R24 to S-R30).
@@ -368,6 +353,23 @@ function viewMyPrograms(array $u, array $q): array
 
 // ---------------- Faculty ----------------
 
+// Lab records share their parent section's CRN and faculty assignment; they are not new sections.
+function facultyTeachingSchedule(int $facultyId, string $semesterId, string $semesterName): array
+{
+    return table("$semesterName teaching schedule", 'SELECT cs.meeting_Type AS Meeting, ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ', ' . SEATS . '
+      FROM (
+        SELECT CRN, course_ID, section_No, faculty_ID, time_Slot_ID, room_ID, semester_ID, available_Seats,
+          \'Lecture\' AS meeting_Type FROM Course_Section
+        UNION ALL
+        SELECT parent.CRN, parent.course_ID, parent.section_No, parent.faculty_ID, lab.time_Slot_ID,
+          lab.lab_ID AS room_ID, parent.semester_ID, parent.available_Seats, \'Lab\' AS meeting_Type
+        FROM Course_Section parent JOIN Course_Section_Lab lab ON lab.CRN = parent.CRN
+      ) cs ' . SECTION_JOINS . '
+      WHERE cs.faculty_ID = ? AND cs.semester_ID = ? ' . ORDER_BY_TIME . ', cs.CRN, cs.meeting_Type',
+        [$facultyId, $semesterId],
+        'Lecture and Lab are existing meetings of the same course section and share its CRN and recorded instructor. Open seats apply to the parent section.');
+}
+
 function viewTeaching(array $u, array $q): array
 {
     $f = one("SELECT f.`rank`, f.faculty_Type, f.specialty,
@@ -376,15 +378,21 @@ function viewTeaching(array $u, array $q): array
         CONCAT(ro.building_ID, '-', ro.room_No) AS office
       FROM Faculty f LEFT JOIN Room ro ON ro.room_ID = f.office_ID WHERE f.faculty_ID = ?", [$u['id']]);
     $cur = currentSemester();
-    $next = nextSemester();
+    $semesters = rows('SELECT semester_ID, semester_Name FROM Semester ORDER BY start_Date');
+    $selected = ['semester_ID' => $cur['id'], 'semester_Name' => $cur['name']];
+    foreach ($semesters as $semester) {
+        if ($semester['semester_ID'] === ($q['semester'] ?? null)) $selected = $semester;
+    }
     $advisees = one('SELECT COUNT(*) AS n FROM Advisor WHERE faculty_ID = ?', [$u['id']]);
     $mine = rows('SELECT cs.CRN, cs.course_ID FROM Course_Section cs WHERE cs.faculty_ID = ? AND cs.semester_ID = ? ORDER BY cs.CRN',
-        [$u['id'], $cur['id']]);
+        [$u['id'], $selected['semester_ID']]);
     $blocks = [
+        ['type' => 'filters', 'filters' => [['name' => 'semester', 'label' => 'Semester',
+            'value' => $selected['semester_ID'],
+            'options' => array_map(fn ($s) => [$s['semester_ID'], $s['semester_Name']], $semesters)]]],
         stats([['Rank', $f['rank']], ['Type', $f['faculty_Type']], ['Department(s)', $f['depts']], ['Office', $f['office']],
-            ["{$cur['name']} sections", count($mine)], ['Advisees', $advisees['n']]]),
-        table("{$cur['name']} teaching schedule", 'SELECT ' . SECTION_COLUMNS . ', ' . TIME_ROOM . ', ' . SEATS . ' FROM Course_Section cs ' . SECTION_JOINS . '
-          WHERE cs.faculty_ID = ? AND cs.semester_ID = ? ' . ORDER_BY_TIME, [$u['id'], $cur['id']]),
+            ["{$selected['semester_Name']} sections", count($mine)], ['Advisees', $advisees['n']]]),
+        facultyTeachingSchedule((int) $u['id'], $selected['semester_ID'], $selected['semester_Name']),
     ];
     foreach ($mine as $s) {
         $blocks[] = table("Roster: {$s['course_ID']} (CRN {$s['CRN']})", "SELECT u.user_ID AS `Student ID`,
@@ -394,10 +402,6 @@ function viewTeaching(array $u, array $q): array
           JOIN Login l ON l.user_ID = e.student_ID
           LEFT JOIN Attendance a ON a.CRN = e.CRN AND a.student_ID = e.student_ID
           WHERE e.CRN = ? GROUP BY u.user_ID, st.student_Year, l.user_Email ORDER BY u.last_Name", [$s['CRN']]);
-    }
-    if ($next) {
-        $blocks[] = table("{$next['name']} teaching schedule", 'SELECT ' . SECTION_COLUMNS . ', ' . TIME_ROOM . ' FROM Course_Section cs ' . SECTION_JOINS . '
-          WHERE cs.faculty_ID = ? AND cs.semester_ID = ? ' . ORDER_BY_TIME, [$u['id'], $next['id']]);
     }
     return ['title' => "Welcome, {$u['name']}", 'subtitle' => $f['specialty'] ? "Specialty: {$f['specialty']}" : '', 'blocks' => $blocks];
 }
@@ -468,7 +472,7 @@ function viewCreateSection(array $u, array $q): array
     if (!$sems) return ['title' => 'Create a course section', 'subtitle' => 'There is no upcoming semester.', 'blocks' => []];
     $sem = $sems[0];
     foreach ($sems as $s) if ($s['semester_ID'] === ($q['semester'] ?? null)) $sem = $s;
-    $courses = rows('SELECT course_ID, course_Name FROM Course ORDER BY course_ID');
+    $courses = rows('SELECT course_ID, course_Name, course_Type, course_Credits FROM Course ORDER BY course_ID');
     $fac = rows("SELECT f.faculty_ID, CONCAT(u.first_Name, ' ', u.last_Name) AS name, f.faculty_Type,
         (SELECT GROUP_CONCAT(fd.dept_ID SEPARATOR '/') FROM Faculty_Department fd WHERE fd.faculty_ID = f.faculty_ID) AS depts,
         (SELECT COUNT(*) FROM Course_Section cs WHERE cs.faculty_ID = f.faculty_ID AND cs.semester_ID = ?) AS teaching
@@ -490,11 +494,12 @@ function viewCreateSection(array $u, array $q): array
       ORDER BY r.room_ID");
     $v = fn (string $name, string $fallback) => isset($q[$name]) ? (string) $q[$name] : $fallback;
     return ['title' => 'Create a course section', 'blocks' => [
-        ['type' => 'form', 'title' => "New section for {$sem['semester_Name']}", 'endpoint' => 'create-section', 'submit' => 'Create section', 'keep' => true, 'fields' => [
+        ['type' => 'form', 'title' => "New section for {$sem['semester_Name']}", 'endpoint' => 'create-section', 'submit' => 'Create section', 'keep' => true,
+            'note' => 'Capacity: a whole number from 5 to 10 students. Undergraduate courses need at least two distinct meeting days; three-credit undergraduate courses need exactly two 80-minute meetings (160 minutes weekly). Four-credit undergraduate lecture/lab details remain unresolved; no duration or lab requirement is imposed here. Three-credit graduate courses may meet once for 180 minutes; graduate courses are not restricted to once-weekly schedules.', 'fields' => [
             ['name' => 'semester_ID', 'label' => 'Semester', 'value' => $sem['semester_ID'], 'reload' => 'semester',
                 'options' => array_map(fn ($x) => [$x['semester_ID'], $x['semester_Name']], $sems)],
             ['name' => 'course_ID', 'label' => 'Course', 'value' => $v('course_ID', 'CS455'),
-                'options' => array_map(fn ($c) => [$c['course_ID'], "{$c['course_ID']} {$c['course_Name']}"], $courses)],
+                'options' => array_map(fn ($c) => [$c['course_ID'], "{$c['course_ID']} {$c['course_Name']} ({$c['course_Type']}, {$c['course_Credits']} credits)"], $courses)],
             ['name' => 'faculty_ID', 'label' => 'Faculty', 'value' => $v('faculty_ID', ''),
                 'options' => array_merge([['', 'Choose…']], array_map(fn ($f) => [(string) $f['faculty_ID'],
                     "{$f['name']} ({$f['depts']}, {$f['faculty_Type']}, teaching {$f['teaching']} of " . ($f['faculty_Type'] === 'Full-time' ? 2 : 1) . ')'], $fac))],
@@ -502,7 +507,7 @@ function viewCreateSection(array $u, array $q): array
                 'options' => array_map(fn ($t) => [(string) $t['id'], $t['label']], $slots)],
             ['name' => 'room_ID', 'label' => 'Room', 'value' => $v('room_ID', $rooms[0]['room_ID']),
                 'options' => array_map(fn ($r) => [$r['room_ID'], "{$r['building_Name']} {$r['room_No']} ({$r['room_Type']}, {$r['capacity']} seats)"], $rooms)],
-            ['name' => 'max_Seats', 'label' => 'Max seats', 'type' => 'number', 'min' => 1, 'max' => 10, 'value' => $v('max_Seats', '10')],
+            ['name' => 'max_Seats', 'label' => 'Max seats (5–10)', 'type' => 'number', 'min' => 5, 'max' => 10, 'step' => 1, 'required' => true, 'value' => $v('max_Seats', '10')],
         ]],
         table("Newest {$sem['semester_Name']} sections", 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ' FROM Course_Section cs ' . SECTION_JOINS . '
           WHERE cs.semester_ID = ? ORDER BY cs.CRN DESC LIMIT 5', [$sem['semester_ID']]),
@@ -668,6 +673,7 @@ function publicMajorBrowser(array $q): array
                 'code' => $code,
                 'title' => $row['Title'],
                 'credits' => $row['Credits'],
+                'level' => $row['Level'],
                 'sections' => []
             ];
         }
@@ -724,7 +730,7 @@ function viewCatalog(array $u, array $q): array
           LEFT JOIN Building b ON b.building_ID = r.building_ID ORDER BY d.dept_Name"),
         ['type' => 'filters', 'filters' => [['name' => 'dept', 'label' => 'Department', 'value' => $deptId,
             'options' => array_map(fn ($d) => [$d['dept_ID'], $d['dept_Name']], $depts)]]],
-        table('Courses in this department', "SELECT c.course_ID AS Course, c.course_Name AS Title, c.course_Credits AS Credits, c.course_Type AS Level,
+        table('Courses in this department', "SELECT c.course_ID AS Course, c.course_Name AS Title, c.course_Credits AS Credits, c.course_Type AS Type, " . COURSE_LEVEL . " AS Level,
             COALESCE((SELECT GROUP_CONCAT(CONCAT(cp.prerequisite_Course_ID, ' (min ', cp.min_Grade_Req, ')') SEPARATOR ', ')
               FROM Course_Prerequisite cp WHERE cp.course_ID = c.course_ID), '—') AS Prerequisites
           FROM Course c WHERE c.dept_ID = ? ORDER BY c.course_ID", [$deptId]),
@@ -801,6 +807,81 @@ function viewPrereqSearch(array $u, array $q): array
     return ['title' => 'Prerequisite search', 'subtitle' => 'See which courses you must pass first, and the minimum grade.', 'blocks' => $blocks];
 }
 
+// Admin-only lookup inside the existing account view. Uses the shared read-only form/table renderer.
+function adminStudentAccountBlocks(array $me, array $q): array
+{
+    if (($me['role'] ?? null) !== 'Admin') return [];
+
+    $raw = $q['student'] ?? '';
+    $term = is_string($raw) ? trim($raw) : '';
+    $blocks = [[
+        'type' => 'form', 'title' => 'Student account lookup', 'method' => 'view', 'submit' => 'View student',
+        'fields' => [['name' => 'student', 'label' => 'Student ID or campus email', 'value' => $term,
+            'placeholder' => '100001 or student@campus.edu']],
+        'note' => 'Read-only student information for administrators. Your account settings above apply only to you.',
+    ]];
+    if ($raw === '') return $blocks;
+    if (!is_string($raw) || $term === '' || strlen($term) > 254
+        || (ctype_digit($term) && filter_var($term, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 2147483647]]) === false)) {
+        $blocks[] = ['type' => 'message', 'ok' => false, 'heading' => 'Check the student lookup',
+            'message' => 'Enter a valid student ID or campus email.'];
+        return $blocks;
+    }
+
+    // Both identifiers are bound parameters. Only the trusted column fragment varies.
+    $column = ctype_digit($term) ? 's.student_ID' : 'l.user_Email';
+    $student = one("SELECT s.student_ID, s.student_Type, s.student_Year,
+        u.first_Name, u.middle_Name, u.last_Name, l.user_Email,
+        ug.undergraduate_Student_Type AS undergraduate_status,
+        g.graduate_Student_Type AS graduate_status,
+        ah.hold_ID AS academic_definition, ash.hold_ID AS academic_hold, ash.hold_Date AS academic_date,
+        dh.hold_ID AS disciplinary_definition, dsh.hold_ID AS disciplinary_hold, dsh.hold_Date AS disciplinary_date
+      FROM Student s
+      JOIN User u ON u.user_ID = s.student_ID
+      LEFT JOIN Login l ON l.user_ID = s.student_ID
+      LEFT JOIN Undergraduate_Student ug ON ug.student_ID = s.student_ID AND s.student_Type = 'Undergraduate'
+      LEFT JOIN Graduate_Student g ON g.student_ID = s.student_ID AND s.student_Type = 'Graduate'
+      LEFT JOIN Hold ah ON ah.hold_Type = 'Academic'
+      LEFT JOIN Student_Hold ash ON ash.student_ID = s.student_ID AND ash.hold_ID = ah.hold_ID
+      LEFT JOIN Hold dh ON dh.hold_Type = 'Disciplinary'
+      LEFT JOIN Student_Hold dsh ON dsh.student_ID = s.student_ID AND dsh.hold_ID = dh.hold_ID
+      WHERE $column = ?", [ctype_digit($term) ? (int) $term : $term]);
+    if (!$student) {
+        $blocks[] = ['type' => 'message', 'ok' => false, 'heading' => 'Student not found',
+            'message' => 'No student account matches that ID or campus email.'];
+        return $blocks;
+    }
+
+    $status = match ($student['student_Type']) {
+        'Undergraduate' => $student['undergraduate_status'],
+        'Graduate' => $student['graduate_status'],
+        default => null,
+    };
+    $status = in_array($status, ['Full-time', 'Part-time'], true) ? $status : 'Unknown / not on file';
+    $hold = static function (string $kind) use ($student): string {
+        if ($student[$kind . '_definition'] === null) return 'Unknown (hold type unavailable)';
+        return $student[$kind . '_hold'] === null ? 'No record on file' : 'Yes (record on file)';
+    };
+    $blocks[] = [
+        'type' => 'table', 'title' => 'Student Account Information',
+        'note' => 'Enrollment status comes from the student subtype record, not enrolled credits. Hold indicators report linked records only. The database has no resolved flag or end date, so current active/resolved status cannot be established separately.',
+        'columns' => ['Field', 'Value'],
+        'rows' => [
+            ['Student ID', $student['student_ID']],
+            ['Student name', trim(implode(' ', array_filter([$student['first_Name'], $student['middle_Name'], $student['last_Name']], static fn ($part) => $part !== null && $part !== '')))],
+            ['Campus email', $student['user_Email'] ?? 'Not on file'],
+            ['Student type', $student['student_Type']],
+            ['Student year', $student['student_Year']],
+            ['Enrollment status', $status],
+            ['Academic Hold', $hold('academic')],
+            ['Academic Hold placed on', $student['academic_date'] !== null ? shortDate($student['academic_date']) : '—'],
+            ['Disciplinary Hold', $hold('disciplinary')],
+            ['Disciplinary Hold placed on', $student['disciplinary_date'] !== null ? shortDate($student['disciplinary_date']) : '—'],
+        ],
+    ];
+    return $blocks;
+}
+
 // The signed-in user's own account: address (S-R20) and password (S-R21). The ID and email can't be changed (S-F14, S-F15).
 function viewAccount(array $me, array $q): array
 {
@@ -816,6 +897,7 @@ function viewAccount(array $me, array $q): array
             ['name' => 'zip_Code', 'label' => 'ZIP code', 'value' => $u['zip_Code'] ?? ''],
         ]],
         ...passwordChangeBlocks($me['id']),
+        ...adminStudentAccountBlocks($me, $q),
     ]];
 }
 
@@ -823,12 +905,16 @@ function viewAccount(array $me, array $q): array
 // password. Which step shows depends on what this browser has done so far (kept in the session).
 function passwordChangeBlocks(int $userId): array
 {
+    if (!function_exists('demoRecoveryEnabled') || !demoRecoveryEnabled()) {
+        return [['type' => 'message', 'ok' => false, 'heading' => 'Password recovery delivery unavailable',
+            'message' => 'Contact your administrator. Secure external delivery is not configured; the local-demo inbox is disabled.']];
+    }
     $pending = one('SELECT reset_ID FROM Password_Reset WHERE user_ID = ? AND purpose = \'Change\' AND used_At IS NULL
-      AND expires_At > NOW() ORDER BY reset_ID DESC LIMIT 1', [$userId]);
+      AND expires_At > NOW() AND attempts < ' . RESET_MAX_TRIES . ' ORDER BY reset_ID DESC LIMIT 1', [$userId]);
     $mine = ($_SESSION['reset_user'] ?? null) === $userId;
     $request = ['type' => 'form', 'title' => $pending && $mine ? 'Send a new code' : 'Change password', 'endpoint' => 'request-password-change',
-        'submit' => 'Email me a code', 'fields' => [['name' => 'current', 'label' => 'Current password', 'type' => 'password', 'value' => '']],
-        'note' => 'We email a 6-digit code to your campus inbox (see Inbox). It works for 15 minutes.'];
+        'submit' => 'Create local demo code', 'fields' => [['name' => 'current', 'label' => 'Current password', 'type' => 'password', 'value' => '']],
+        'note' => 'Local development only: a 6-digit code appears in your authenticated Inbox for 15 minutes. No real email is sent.'];
     if ($pending && $mine && ($_SESSION['reset_verified'] ?? null) === (int) $pending['reset_ID']) {
         return [['type' => 'form', 'title' => 'Choose a new password', 'endpoint' => 'complete-password-change', 'submit' => 'Save new password', 'fields' => [
             ['name' => 'password', 'label' => 'New password', 'type' => 'password', 'value' => ''],
@@ -855,11 +941,14 @@ function viewInbox(array $u, array $q): array
 // Admin: send a user a password-reset email (A-R6). The admin never sees or sets the new password.
 function viewResetPassword(array $u, array $q): array
 {
+    if (!function_exists('demoRecoveryEnabled') || !demoRecoveryEnabled()) {
+        return ['title' => 'Reset a password', 'blocks' => passwordChangeBlocks((int) $u['id'])];
+    }
     $level = one('SELECT security_Level FROM Admin WHERE admin_ID = ?', [$u['id']])['security_Level'];
     return ['title' => 'Reset a password', 'subtitle' => $level === 'Read-Write'
-            ? 'The user gets an email with a code and a link, and chooses the new password themselves.'
+            ? 'Local development only: a code and link appear in the owner’s authenticated Inbox; no real email is sent.'
             : 'You are a Read-Only admin, so sending a reset will be refused.', 'blocks' => [
-        ['type' => 'form', 'title' => 'Send a password reset', 'endpoint' => 'send-password-reset', 'submit' => 'Send reset email', 'fields' => [
+        ['type' => 'form', 'title' => 'Send a password reset', 'endpoint' => 'send-password-reset', 'submit' => 'Create local demo reset', 'fields' => [
             ['name' => 'login', 'label' => 'User email or ID', 'value' => '', 'placeholder' => 'student@campus.edu or 100001'],
         ], 'note' => 'The code and link work for 15 minutes. The reset is recorded in the audit log.'],
         table('Recent password resets', "SELECT CONCAT(u.first_Name, ' ', u.last_Name, ' (', r.user_ID, ')') AS User,

@@ -1,0 +1,35 @@
+name: campus-registration-concurrency
+services:
+  registration-db:
+    image: mysql:8.4
+    hostname: campus-registration-isolated
+    command: ["--skip-log-bin"]
+    environment:
+      MYSQL_RANDOM_ROOT_PASSWORD: "yes"
+      MYSQL_DATABASE: registration_concurrency_test
+      MYSQL_USER: registration_fixture
+      MYSQL_PASSWORD: disposable-fixture-only
+    tmpfs:
+      - /var/lib/mysql
+    networks: [isolated]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "--host=127.0.0.1", "--silent"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+      start_period: 15s
+  tests:
+    build: .
+    working_dir: /app
+    volumes:
+      - ../..:/app:ro
+    environment:
+      REGISTRATION_TEST_ACK: ISOLATED_DISPOSABLE_DATABASE_ONLY
+    depends_on:
+      registration-db:
+        condition: service_healthy
+    networks: [isolated]
+    command: ["php", "tests/registration-concurrency/run.php"]
+networks:
+  isolated:
+    internal: true

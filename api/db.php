@@ -22,8 +22,9 @@ function config(): array
         $config = [
             'host' => $fromFile['host'] ?? (getenv('DB_HOST') ?: '127.0.0.1'),
             'port' => (int) ($fromFile['port'] ?? (getenv('DB_PORT') ?: 3306)),
+            'socket' => $fromFile['socket'] ?? (getenv('DB_SOCKET') ?: '/tmp/mysql.sock'),
             'user' => $fromFile['user'] ?? (getenv('DB_USER') ?: 'campus'),
-            'password' => $fromFile['password'] ?? (getenv('DB_PASSWORD') ?: 'campus'),
+            'password' => $fromFile['password'] ?? (getenv('DB_PASSWORD') !== false ? getenv('DB_PASSWORD') : 'campus'),
             'database' => $fromFile['database'] ?? (getenv('DB_NAME') ?: 'campus_connect'),
         ];
     }
@@ -33,19 +34,26 @@ function config(): array
 function db(): PDO
 {
     static $pdo = null;
+
     if ($pdo === null) {
         $c = config();
+
+        $dsn = $c['host'] === 'localhost'
+            ? "mysql:unix_socket={$c['socket']};dbname={$c['database']};charset=utf8mb4"
+            : "mysql:host={$c['host']};port={$c['port']};dbname={$c['database']};charset=utf8mb4";
+
         $pdo = new PDO(
-            "mysql:host={$c['host']};port={$c['port']};dbname={$c['database']};charset=utf8mb4",
+            $dsn,
             $c['user'],
             $c['password'],
             [
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                PDO::ATTR_EMULATE_PREPARES => false, // real prepared statements: numbers come back as numbers
+                PDO::ATTR_EMULATE_PREPARES => false,
             ]
         );
     }
+
     return $pdo;
 }
 

@@ -23,27 +23,156 @@ async function showDashboard(user) {
     a.dataset.view = v.id;
     return a;
   }));
-  const wanted = location.hash.slice(1).split('?')[0];
-  openView(views.some((v) => v.id === wanted) ? wanted : views[0].id);
+  return openDashboardLocation();
 }
 
 let currentView = null;
 let currentParams = {};
-async function openView(id, params = {}, flash = null) {
+let viewRequestId = 0;
+// Hash parameters are data for the view; the role-specific navigation decides which view may open.
+function openDashboardLocation() {
+  const hash = location.hash.slice(1);
+  const separator = hash.indexOf('?');
+  const id = separator < 0 ? hash : hash.slice(0, separator);
+  const params = Object.fromEntries(new URLSearchParams(separator < 0 ? '' : hash.slice(separator + 1)));
+  const links = [...document.querySelectorAll('#nav a[data-view]')];
+  const wanted = links.find((a) => a.dataset.view === id);
+  const target = wanted || links[0];
+  if (target) return openView(target.dataset.view, wanted ? params : {}, null, 'replace');
+}
+
+async function openView(id, params = {}, flash = null, historyMode = 'push') {
+  const requestId = ++viewRequestId;
   currentView = id;
   currentParams = params;
   document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === id));
   const qs = new URLSearchParams(params).toString();
-  history.replaceState(null, '', `#${id}${qs ? `?${qs}` : ''}`);
+  const hash = `#${id}${qs ? `?${qs}` : ''}`;
+  if (location.hash !== hash) {
+    history[historyMode === 'replace' ? 'replaceState' : 'pushState'](null, '', hash);
+  }
   const blocks = document.getElementById('page-blocks');
   blocks.innerHTML = '<p class="muted">Loading…</p>';
   const res = await fetch(`/api/views/${id}${qs ? `?${qs}` : ''}`);
+  // Ignore older responses when another lookup or filter request has started.
+  if (requestId !== viewRequestId) return;
   if (res.status === 401) return showLogin();
   const page = await res.json();
-  if (currentView !== id) return;
+  if (currentView !== id || requestId !== viewRequestId) return;
+  // Use the server-validated Master Schedule choices for refreshes and future filter changes.
+  if (id === 'master-schedule' && res.ok) {
+    const filters = (page.blocks || []).find((b) => b.type === 'filters')?.filters || [];
+    const choices = filters.filter((f) => f.name === 'semester' || f.name === 'dept');
+    if (choices.length === 2) {
+      currentParams = Object.fromEntries(choices.map((f) => [f.name, f.value]));
+      history.replaceState(null, '', `#${id}?${new URLSearchParams(currentParams)}`);
+    }
+  }
   document.getElementById('page-title').textContent = page.title || page.error;
   document.getElementById('page-subtitle').textContent = page.subtitle || '';
   blocks.replaceChildren(...(flash ? [renderFlash(flash)] : []), ...(page.blocks || []).map((b) => renderBlock(b, id)));
+}
+
+// Student audit: recorded progress is separated from policies the database cannot establish.
+function renderDegreeAudit(audit) {
+  const root = el('div', 'degree-audit');
+  const section = (title, note = null) => {
+    const box = el('section', 'audit-section');
+    box.append(el('h3', 'audit-section-title', title));
+    if (note) box.append(el('p', 'muted audit-note', note));
+    return box;
+  };
+  const auditTable = (title, columns, rows, empty) => {
+    const block = renderBlock({ type: 'table', title, columns, rows, note: null }, null);
+    if (!rows.length) block.querySelector('.empty-row').textContent = empty;
+    return block;
+  };
+  const profile = section('Student academic profile');
+  profile.append(el('p', 'audit-student-name', audit.profile.name));
+  const fields = el('dl', 'audit-profile-grid');
+  const majors = audit.programs.filter(p => p.kind === 'Major');
+  const minors = audit.programs.filter(p => p.kind === 'Minor');
+  for (const [label, value] of [
+    ['Student ID', audit.profile.id], ['Student type', audit.profile.type],
+    ['Academic year', audit.profile.year], ['Enrollment status', audit.profile.enrollment_status],
+    ['Degree program', majors.map(p => `${p.name}${Number(p.is_primary) ? ' (primary)' : ''}`).join('; ') || 'Not on file'],
+    ['Minor', minors.map(p => p.name).join('; ') || 'None declared'], ['Records checked', audit.profile.as_of],
+  ]) {
+    const field = el('div'); field.append(el('dt', null, label), el('dd', null, String(value))); fields.append(field);
+  }
+  profile.append(fields); root.append(profile);
+
+  const credit = section('Overall credit progress', 'Program-specific graduation credit targets are not stored. Overall degree completion cannot be calculated.');
+  credit.append(renderBlock({ type: 'stats', items: [
+    { label: 'Passing-course credits · provisional', value: audit.credits.earned_provisional },
+    { label: 'In-progress credits · not earned', value: audit.credits.in_progress },
+    { label: 'Future registered credits · not earned', value: audit.credits.future_registered },
+    { label: 'Overall degree completion', value: 'Unavailable' },
+  ] }, null));
+  credit.append(el('p', 'muted audit-note', `${audit.credits.passing_courses} distinct courses with recognized passing transcript grades. Credits count once per course using current course credits. In-progress totals also count distinct courses and are not added to earned credits; repeats and graduation credit policies need confirmation.`));
+  credit.append(el('p', 'muted audit-note', `Stored student credit total: ${audit.profile.stored_credits ?? 'Unavailable'}. This separate record is not used as a graduation target.`));
+  root.append(credit);
+
+  for (const [kind, programs] of [['Major', majors], ['Minor', minors]]) {
+    const group = section(`${kind} requirements`, 'Percentages describe only each stored required-course list. Programs are checked independently; cross-program credit sharing and final degree eligibility are not established.');
+    if (!programs.length) group.append(el('p', 'muted', kind === 'Minor' ? 'No minor declared.' : 'No major recorded. Requirements are unavailable.'));
+    for (const program of programs) {
+      const card = el('details', 'audit-program'); card.open = true;
+      const summary = el('summary', 'audit-program-heading');
+      const title = el('div'); title.append(el('strong', null, program.name), el('span', 'muted small', program.id));
+      const state = el('span', `audit-state${program.total && program.met === program.total ? ' audit-state-met' : ''}`,
+        program.percent === null ? 'Requirements unavailable' : `${program.met} of ${program.total} listed courses met · ${program.percent}%`);
+      summary.append(title, state); card.append(summary);
+      if (program.percent !== null) {
+        const meter = el('progress', 'audit-progress'); meter.max = program.total; meter.value = program.met;
+        meter.setAttribute('aria-label', `${program.name}: ${program.met} of ${program.total} listed course requirements met`); card.append(meter);
+        card.append(el('p', 'muted audit-program-note', `${program.met_credits} of ${program.listed_credits} credits represented by this course list are met in records. This is not the full degree credit requirement.`));
+      }
+      card.append(auditTable('Required courses', ['Course', 'Title', 'Credits', 'Minimum grade', 'Best recorded grade', 'Transcript attempts', 'Status'],
+        program.requirements.map(r => [r.code, r.title, r.credits, r.minimum_grade, r.best_grade ?? '—',
+          r.attempts.map(a => `${a.grade} · ${a.semester}`).join('; ') || 'None recorded', r.status]), 'No requirement mappings are stored for this program. Completion is unavailable.'));
+      group.append(card);
+    }
+    root.append(group);
+  }
+
+  const unavailable = el('div', 'audit-unavailable-grid');
+  for (const item of audit.unavailable) {
+    const card = section(item.title); card.append(el('span', 'audit-state', 'Unavailable'), el('p', 'muted audit-note', item.reason)); unavailable.append(card);
+  }
+  root.append(unavailable);
+
+  const current = section('Courses currently in progress', 'Only ungraded enrollments in semesters that have started and have not ended appear here. These courses do not satisfy completed requirements.');
+  const enrollmentRows = list => list.map(c => [c.code, c.title, c.crn, c.credits, c.semester]);
+  const enrollmentColumns = ['Course', 'Title', 'CRN', 'Credits', 'Semester'];
+  current.append(auditTable('Current courses', enrollmentColumns, enrollmentRows(audit.in_progress), 'No current ungraded enrollments are recorded.'));
+  current.append(auditTable('Future registrations', enrollmentColumns, enrollmentRows(audit.future_registered), 'No future registrations are recorded.'));
+  root.append(current);
+
+  const outstanding = section('Outstanding graduation requirements', 'Graduation eligibility is unavailable. The list below identifies unmet stored major/minor course requirements only; other graduation rules still require confirmation.');
+  outstanding.append(auditTable('Unmet stored course requirements', ['Program', 'Type', 'Course', 'Minimum grade', 'Status'],
+    audit.outstanding.map(r => [r.program, r.kind, r.code, r.minimum_grade, r.status]),
+    'No unmet entries in the stored course lists. This does not establish graduation eligibility.'));
+  outstanding.append(el('p', 'muted audit-note', 'Still unverified: program credit targets, General Education, Liberal Arts, elective allocation, catalog year, residency, GPA, substitutions, repeat policies and any graduate thesis requirements.'));
+  root.append(outstanding);
+
+  if (audit.pending_records.length || audit.review.length) {
+    const review = section('Records needing review', 'These records are shown for clarification, without changing student data.');
+    review.append(auditTable('Record checks', ['Course / program', 'CRN', 'Semester', 'Reason'], [
+      ...audit.review.map(r => [r.code ?? '—', r.crn ?? '—', r.semester ?? '—', r.reason]),
+      ...audit.pending_records.map(r => [r.code, r.crn, r.semester, r.status]),
+    ], 'No record checks are pending.')); root.append(review);
+  }
+  const history = el('details', 'audit-section audit-history');
+  history.append(el('summary', 'audit-section-title', `Academic history · ${audit.credits.transcript_attempts} attempts · ${audit.credits.repeated_courses} repeated courses`));
+  history.append(el('p', 'muted audit-note', 'All transcript attempts are preserved. A repeated passing course contributes credits once; the highest recognized consistent grade is compared with each stored requirement minimum. Unknown grades need review.'));
+  const historyRows = list => list.map(h => [h.code, h.title, h.crn, h.credits, h.grade, h.semester, h.result]);
+  const historyColumns = ['Course', 'Title', 'CRN', 'Credits', 'Grade', 'Semester', 'Record result'];
+  history.append(auditTable('Transcript coursework', historyColumns, historyRows(audit.history), 'No academic history is recorded. A zero provisional total does not establish that no credits were earned elsewhere.'));
+  history.append(auditTable('Other Academic Coursework', historyColumns, historyRows(audit.other_coursework), 'No transcript coursework outside the stored major/minor course lists is recorded.'));
+  history.append(el('p', 'muted audit-note', 'Other Academic Coursework is not automatically assigned to General Education, Liberal Arts, or electives.'));
+  root.append(history);
+  return root;
 }
 
 function renderFlash({ ok, message, heading }) {
@@ -61,7 +190,12 @@ async function runAction(endpoint, body) {
   });
   if (res.status === 401) return showLogin();
   const data = await res.json();
-  await openView(currentView, currentParams, res.ok ? { ok: true, message: data.message } : { ok: false, message: data.error });
+  if (res.ok && endpoint === 'complete-password-change') {
+    showLogin();
+    message.replaceChildren(el('div', 'notice', data.message));
+    return;
+  }
+  await openView(currentView, currentParams, res.ok ? { ok: true, message: data.message } : { ok: false, message: data.error }, 'replace');
   document.querySelector('.content').scrollIntoView({ behavior: 'smooth' });
 }
 
@@ -74,6 +208,7 @@ function el(tag, className, text) {
 
 // onFilter: what a filter change does. By default it reloads the dashboard page with the new values.
 function renderBlock(block, viewId, onFilter = (params) => openView(viewId, params)) {
+  if (block.type === 'degree-audit') return renderDegreeAudit(block.audit);
   if (block.type === 'stats') {
     const grid = el('div', 'stats');
     for (const item of block.items) {
@@ -151,6 +286,8 @@ if (block.type === 'empty-major') {
         input.type = f.type || 'text';
         if (f.min !== undefined) input.min = f.min;
         if (f.max !== undefined) input.max = f.max;
+        if (f.step !== undefined) input.step = f.step;
+        if (f.required) input.required = true;
         input.value = f.value;
         if (f.placeholder) input.placeholder = f.placeholder;
         if (f.type === 'password') input.autocomplete = 'new-password';
@@ -195,7 +332,7 @@ if (block.type === 'empty-major') {
         el('strong', null,
           `${course.code} — ${course.title}`),
         el('span', 'muted small',
-          `${course.credits} credits · ${course.sections.length} section(s)`)
+          `${course.level} · ${course.credits} credits · ${course.sections.length} section(s)`)
       );
 
       summary.append(info);
@@ -268,7 +405,9 @@ item.append(availability);
       const td = el('td');
       const btn = el('button', `row-action ${block.action.style || ''}`, block.action.label);
       btn.type = 'button';
+      btn.disabled = Boolean(block.action.disabled);
       btn.addEventListener('click', () => {
+        if (block.action.disabled) return;
         btn.disabled = true;
         runAction(block.action.endpoint, { [block.action.column]: row[keyIndex] });
       });
@@ -401,7 +540,6 @@ function onSubmit(formEl, box, send, done) {
 const resetForm = document.getElementById('reset-form');
 const codeForm = document.getElementById('code-form');
 const newpassForm = document.getElementById('newpass-form');
-const mailForm = document.getElementById('mail-form');
 let resetLogin = '';
 function openReset(login) {
   resetForm.reset();
@@ -455,17 +593,10 @@ onSubmit(newpassForm, document.getElementById('newpass-message'), (body) => post
   form.password.focus();
 });
 
-// Campus mail (demo) for signed-out users
+// Recovery information never asks for ID/DOB or opens an unauthenticated inbox.
 document.getElementById('open-mail').addEventListener('click', (e) => {
   e.preventDefault();
-  mailForm.reset();
-  document.getElementById('mail-message').replaceChildren();
-  document.getElementById('mail-list').replaceChildren();
   showAuthView('mail-view');
-  mailForm.user_ID.focus();
-});
-onSubmit(mailForm, document.getElementById('mail-message'), (body) => postJson('/api/demo-mail', body), (data) => {
-  document.getElementById('mail-list').replaceChildren(renderMail(data.messages));
 });
 
 // The emailed link (#reset?token=...) skips the code and goes straight to choosing a new password.
@@ -479,12 +610,13 @@ async function openResetLink(token) {
     showBox(document.getElementById('reset-message'), 'error', data.error);
     return;
   }
-  resetLogin = data.email;
-  showNewPasswordStep(`For ${data.email}. At least 8 characters, with a letter and a number.`);
+  resetLogin = data.email || '';
+  showNewPasswordStep('Verification accepted. At least 8 characters, with a letter and a number.');
 }
 window.addEventListener('hashchange', () => {
   const token = new URLSearchParams(location.hash.split('?')[1] || '').get('token');
-  if (location.hash.startsWith('#reset?') && token) openResetLink(token);
+  if (location.hash.startsWith('#reset?') && token) return openResetLink(token);
+  if (!dashboardPage.hidden) openDashboardLocation();
 });
 
 // Emails, newest first. A reset link in the text becomes clickable.
@@ -552,15 +684,27 @@ async function loadWelcome() {
 }
 
 // The public course explorer on the welcome page, with its semester and major filters.
+let publicScheduleRequestId = 0;
 async function loadPublicSchedule(params = {}) {
+  const requestId = ++publicScheduleRequestId;
   const box = document.getElementById('w-schedule');
+  // Keep the current filters usable, but clear courses from the previous selection immediately.
+  const filters = box.querySelector('.filters');
+  box.replaceChildren(...(filters ? [filters] : []), el('p', 'muted', 'Loading course options...'));
+  box.setAttribute('aria-busy', 'true');
   try {
     const res = await fetch(`/api/major-browser?${new URLSearchParams(params)}`);
+    if (requestId !== publicScheduleRequestId) return;
     if (!res.ok) throw new Error();
     const { blocks } = await res.json();
+    if (requestId !== publicScheduleRequestId) return;
     box.replaceChildren(...blocks.map((b) => renderBlock(b, null, loadPublicSchedule)));
   } catch {
-    box.replaceChildren(el('p', 'muted', 'The schedule could not be loaded. Please try again later.'));
+    if (requestId !== publicScheduleRequestId) return;
+    box.replaceChildren(...(filters ? [filters] : []),
+      el('p', 'muted', 'The schedule could not be loaded. Please try again later.'));
+  } finally {
+    if (requestId === publicScheduleRequestId) box.setAttribute('aria-busy', 'false');
   }
 }
 

@@ -1,0 +1,86 @@
+-- HISTORICAL RECORD ONLY - ALREADY APPLIED TO THE LOCAL DEVELOPMENT DATABASE.
+-- All original SQL is retained below as comments to prevent accidental re-execution.
+-- This file executes no statements, including START TRANSACTION or COMMIT.
+-- It is not a migration for AWS or any other environment. See README.md.
+-- Original SHA-256: 3f68398454bf07f1e321387e57dcc718d996caefe0ca93d57717b76d4d02ec0c
+-- Original SQL follows; remove no prefixes without explicit authorization.
+-- |
+-- |-- Campus Connect: Fall 2026 Graduate Scheduling
+-- |-- Five 3-credit graduate sections, 180 minutes once weekly.
+-- |-- Local database migration. No automatic COMMIT.
+-- |
+-- |START TRANSACTION;
+-- |
+-- |-- 1. Create five 180-minute periods.
+-- |INSERT INTO Period (period_ID, start_Time, end_Time)
+-- |VALUES
+-- |(25, '09:00:00', '12:00:00'),
+-- |(26, '09:50:00', '12:50:00'),
+-- |(27, '14:40:00', '17:40:00'),
+-- |(28, '16:30:00', '19:30:00'),
+-- |(29, '09:50:00', '12:50:00');
+-- |
+-- |-- 2. Create five new time slots.
+-- |INSERT INTO Time_Slot (time_Slot_ID)
+-- |VALUES (49), (50), (51), (52), (53);
+-- |
+-- |-- 3. Assign one meeting day to each slot.
+-- |-- Day IDs: F=Friday, R=Thursday,
+-- |-- M=Monday, W=Wednesday.
+-- |INSERT INTO Time_Slot_Day (time_Slot_ID, day_ID)
+-- |VALUES
+-- |(49, 'F'),
+-- |(50, 'R'),
+-- |(51, 'M'),
+-- |(52, 'W'),
+-- |(53, 'M');
+-- |
+-- |-- 4. Link slots to their 180-minute periods.
+-- |INSERT INTO Time_Slot_Period (time_Slot_ID, period_ID)
+-- |VALUES
+-- |(49, 25),
+-- |(50, 26),
+-- |(51, 27),
+-- |(52, 28),
+-- |(53, 29);
+-- |
+-- |-- 5. Update only the five graduate sections.
+-- |UPDATE Course_Section
+-- |SET time_Slot_ID = CASE CRN
+-- |    WHEN 10447 THEN 49
+-- |    WHEN 10465 THEN 50
+-- |    WHEN 10483 THEN 51
+-- |    WHEN 10501 THEN 52
+-- |    WHEN 10537 THEN 53
+-- |END
+-- |WHERE semester_ID = 'FA26'
+-- |  AND CRN IN (10447, 10465, 10483, 10501, 10537);
+-- |
+-- |-- Expected: 5 sections updated.
+-- |SELECT ROW_COUNT() AS updated_sections;
+-- |
+-- |-- 6. Verify schedules and meeting duration.
+-- |SELECT
+-- |    cs.CRN,
+-- |    cs.course_ID,
+-- |    d.week_Day,
+-- |    p.start_Time,
+-- |    p.end_Time,
+-- |    TIME_TO_SEC(
+-- |        TIMEDIFF(p.end_Time, p.start_Time)
+-- |    ) / 60 AS duration_minutes
+-- |FROM Course_Section cs
+-- |JOIN Time_Slot_Day tsd
+-- |    ON tsd.time_Slot_ID = cs.time_Slot_ID
+-- |JOIN Day d
+-- |    ON d.day_ID = tsd.day_ID
+-- |JOIN Time_Slot_Period tsp
+-- |    ON tsp.time_Slot_ID = cs.time_Slot_ID
+-- |JOIN Period p
+-- |    ON p.period_ID = tsp.period_ID
+-- |WHERE cs.CRN IN
+-- |    (10447, 10465, 10483, 10501, 10537)
+-- |ORDER BY cs.CRN;
+-- |
+-- |-- No COMMIT.
+-- |-- Validate all scheduling conflicts before committing.

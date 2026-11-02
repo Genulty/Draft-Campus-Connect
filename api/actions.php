@@ -28,11 +28,39 @@ function overlapsAny(string $column, int $count): string
         AND p1.start_Time < p2.end_Time AND p2.start_Time < p1.end_Time)";
 }
 
+// Every enrollment writer must lock this existing parent row before its first
+// ordinary SELECT. Locking reads do not establish a REPEATABLE READ snapshot, so
+// a waiter validates against a fresh snapshot after the prior writer finishes.
+// Order: Student first, then the existing section/enrollment locks. Keep this
+// discipline for future enrollment writers; previews must remain read-only.
+function lockStudentRegistration(int $studentId): void
+{
+    if (!db()->inTransaction()) {
+        throw new LogicException('Student registration locks require an active transaction.');
+    }
+    if (!one('SELECT student_ID FROM Student WHERE student_ID = ? FOR UPDATE', [$studentId])) {
+        fail('That student account does not exist.');
+    }
+}
+
+// Validate API section identifiers without accepting PHP's lossy integer casts.
+function registrationCrn(mixed $value): int
+{
+    if ((!is_int($value) && !is_string($value))
+        || !preg_match('/\A[1-9][0-9]*\z/', (string) $value)
+        || filter_var($value, FILTER_VALIDATE_INT) === false) {
+        fail('Choose a valid course section (CRN).');
+    }
+    return (int) $value;
+}
+
 // ---------- Student: add a course section (S-R22, UC-24/25) ----------
 // Throws a RuleError naming the broken rule, or returns the section label if the student may add it.
-// $lock locks the section row so two students can't take the last seat at the same time.
+// $lock serializes this student first, then retains section locks for last-seat safety.
 function checkAdd(int $studentId, int $crn, bool $lock): string
 {
+    if ($lock) lockStudentRegistration($studentId);
+
     $sec = one("SELECT cs.*, c.course_Name, c.course_Credits, c.course_Type, s.semester_Name,
         CURDATE() BETWEEN s.add_Start AND s.add_End AS add_open, s.add_Start, s.add_End
       FROM Course_Section cs JOIN Course c ON c.course_ID = cs.course_ID JOIN Semester s ON s.semester_ID = cs.semester_ID
@@ -129,6 +157,7 @@ function addSection(int $studentId, int $crn): array
 function dropSection(int $studentId, int $crn): array
 {
     return transaction(function () use ($studentId, $crn) {
+        lockStudentRegistration($studentId);
         $row = one('SELECT e.grade, cs.course_ID, s.semester_Name, s.drop_Start, s.drop_End,
             CURDATE() BETWEEN s.drop_Start AND s.drop_End AS drop_open
           FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN JOIN Semester s ON s.semester_ID = cs.semester_ID
@@ -141,6 +170,40 @@ function dropSection(int $studentId, int $crn): array
     });
 }
 
+// Time_Slot_Day and Time_Slot_Period apply each linked period to every linked day.
+// Validate the actual relationships, never a time-slot-number convention.
+function validateSectionSchedule(array $course, int $slotId): void
+{
+    $meetings = rows('SELECT DISTINCT d.day_ID, p.period_ID,
+        TIME_TO_SEC(p.start_Time) AS start_seconds, TIME_TO_SEC(p.end_Time) AS end_seconds
+      FROM Time_Slot ts
+      LEFT JOIN Time_Slot_Day td ON td.time_Slot_ID = ts.time_Slot_ID
+      LEFT JOIN Day d ON d.day_ID = td.day_ID
+      LEFT JOIN Time_Slot_Period tp ON tp.time_Slot_ID = ts.time_Slot_ID
+      LEFT JOIN Period p ON p.period_ID = tp.period_ID
+      WHERE ts.time_Slot_ID = ?', [$slotId]);
+    $days = [];
+    $periods = [];
+    if (!$meetings) fail('Choose a time slot with recorded meeting days and valid start/end times.');
+    foreach ($meetings as $meeting) {
+        if ($meeting['day_ID'] === null || $meeting['period_ID'] === null
+            || $meeting['start_seconds'] === null || $meeting['end_seconds'] === null
+            || (int) $meeting['end_seconds'] <= (int) $meeting['start_seconds']) {
+            fail('Choose a time slot with recorded meeting days and valid start/end times.');
+        }
+        $days[$meeting['day_ID']] = true;
+        $periods[$meeting['period_ID']] = (int) $meeting['end_seconds'] - (int) $meeting['start_seconds'];
+    }
+    if ($course['course_Type'] !== 'Undergraduate') return;
+    if (count($days) < 2) {
+        fail("{$course['course_ID']} is undergraduate and must meet on at least two distinct days each week. Choose a different time slot.");
+    }
+    if ((int) $course['course_Credits'] === 3
+        && (count($days) !== 2 || count($periods) !== 1 || reset($periods) !== 80 * 60)) {
+        fail("{$course['course_ID']} is a three-credit undergraduate course: choose exactly two meeting days with one 80-minute meeting each day (160 minutes weekly).");
+    }
+}
+
 // ---------- Admin: create a course section (A-R26, UC-13) ----------
 function createSection(int $adminId, array $form): array
 {
@@ -148,19 +211,28 @@ function createSection(int $adminId, array $form): array
         $admin = one('SELECT security_Level FROM Admin WHERE admin_ID = ?', [$adminId]);
         if (!$admin || $admin['security_Level'] !== 'Read-Write') fail('Read-Only admins cannot create course sections.');
 
-        $seats = filter_var($form['max_Seats'] ?? null, FILTER_VALIDATE_INT);
-        if ($seats === false || $seats < 1 || $seats > 10) fail('A section holds 1 to 10 students.');
+        $capacity = $form['max_Seats'] ?? null;
+        // Accept form strings and JSON integers, never coerced floats, booleans, or arrays.
+        if ((!is_int($capacity) && !is_string($capacity))
+            || !preg_match('/\A(?:[5-9]|10)\z/', (string) $capacity)) {
+            fail('Section capacity must be a whole number between 5 and 10 students.');
+        }
+        $seats = (int) $capacity;
         $sem = one('SELECT semester_ID, semester_Name, start_Date <= CURDATE() AS started FROM Semester WHERE semester_ID = ?',
             [(string) ($form['semester_ID'] ?? '')]);
         if (!$sem) fail('Choose a semester.');
         if ($sem['started']) fail("{$sem['semester_Name']} has already started; sections can only be added to an upcoming semester.");
-        $course = one('SELECT course_ID, course_Name, dept_ID FROM Course WHERE course_ID = ?', [(string) ($form['course_ID'] ?? '')]);
+        $course = one('SELECT course_ID, course_Name, dept_ID, course_Type, course_Credits FROM Course WHERE course_ID = ?', [(string) ($form['course_ID'] ?? '')]);
         if (!$course) fail('Choose a course.');
         $fac = one("SELECT f.faculty_ID, f.faculty_Type, CONCAT(u.first_Name, ' ', u.last_Name) AS name
           FROM Faculty f JOIN User u ON u.user_ID = f.faculty_ID WHERE f.faculty_ID = ?", [(int) ($form['faculty_ID'] ?? 0)]);
         if (!$fac) fail('Choose a faculty member.');
-        $slot = one('SELECT time_Slot_ID FROM Time_Slot WHERE time_Slot_ID = ?', [(int) ($form['time_Slot_ID'] ?? 0)]);
+        $slotId = $form['time_Slot_ID'] ?? null;
+        if ((!is_int($slotId) && !is_string($slotId)) || !preg_match('/\A[1-9][0-9]*\z/', (string) $slotId)
+            || filter_var($slotId, FILTER_VALIDATE_INT) === false) fail('Choose a valid time slot.');
+        $slot = one('SELECT time_Slot_ID FROM Time_Slot WHERE time_Slot_ID = ?', [(int) $slotId]);
         if (!$slot) fail('Choose a time slot.');
+        validateSectionSchedule($course, (int) $slot['time_Slot_ID']);
         // Capacity comes from whichever subtype table the room matches (Lecture.seats or Lab.work_Stations);
         // an Office cannot hold a class, so only Lecture/Lab rooms are eligible.
         $room = one("SELECT r.room_ID, COALESCE(lab.work_Stations, lec.seats) AS capacity

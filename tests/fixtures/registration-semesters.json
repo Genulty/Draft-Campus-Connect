@@ -1,0 +1,56 @@
+[
+    {
+        "semester_ID": "FA24",
+        "semester_Name": "Fall 2024",
+        "start_Date": "2024-08-28",
+        "add_Start": "2024-06-29",
+        "add_End": "2024-09-04",
+        "drop_Start": "2024-06-29",
+        "drop_End": "2024-09-18"
+    },
+    {
+        "semester_ID": "SP25",
+        "semester_Name": "Spring 2025",
+        "start_Date": "2025-01-27",
+        "add_Start": "2024-11-28",
+        "add_End": "2025-02-03",
+        "drop_Start": "2024-11-28",
+        "drop_End": "2025-02-17"
+    },
+    {
+        "semester_ID": "FA25",
+        "semester_Name": "Fall 2025",
+        "start_Date": "2025-08-27",
+        "add_Start": "2025-06-28",
+        "add_End": "2025-09-03",
+        "drop_Start": "2025-06-28",
+        "drop_End": "2025-09-17"
+    },
+    {
+        "semester_ID": "SP26",
+        "semester_Name": "Spring 2026",
+        "start_Date": "2026-01-26",
+        "add_Start": "2025-11-27",
+        "add_End": "2026-02-02",
+        "drop_Start": "2025-11-27",
+        "drop_End": "2026-02-16"
+    },
+    {
+        "semester_ID": "FA26",
+        "semester_Name": "Fall 2026",
+        "start_Date": "2026-08-26",
+        "add_Start": "2026-06-27",
+        "add_End": "2026-09-02",
+        "drop_Start": "2026-06-27",
+        "drop_End": "2026-09-16"
+    },
+    {
+        "semester_ID": "SP27",
+        "semester_Name": "Spring 2027",
+        "start_Date": "2027-01-25",
+        "add_Start": "2026-10-01",
+        "add_End": "2027-02-01",
+        "drop_Start": "2026-10-01",
+        "drop_End": "2027-02-15"
+    }
+]
