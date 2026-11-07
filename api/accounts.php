@@ -3,7 +3,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/security.php';
 
-const MAX_ATTEMPTS = 5;   // the account locks after 5 failed sign-in attempts
+const MAX_ATTEMPTS = 3;   // the account locks after 3 failed sign-in attempts (SRS Unsuccessful Login)
 const RESET_AFTER = 3;    // a password reset (emailed code) is offered after 3 failed sign-in attempts
 const MAX_ADVISEES = 15;  // F-F9, used when assigning advisors
 const NAME_PATTERN = "/^[A-Za-z][A-Za-z' -]{0,49}$/";
