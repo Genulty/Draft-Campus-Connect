@@ -403,13 +403,33 @@ item.append(availability);
     for (const v of row) r.append(el('td', null, v === null ? '—' : String(v)));
     if (block.action) {
       const td = el('td');
+      // A per-row choice (e.g. Present/Absent, or a letter grade) sent alongside the action's
+      // key column. Defaults to this row's own value in `defaultColumn`, when that's one of the
+      // choices, else the first option.
+      let picker = null;
+      if (block.action.select) {
+        picker = el('select');
+        picker.name = block.action.select.name;
+        const defaultIndex = block.action.select.defaultColumn ? block.columns.indexOf(block.action.select.defaultColumn) : -1;
+        const rowDefault = defaultIndex >= 0 ? row[defaultIndex] : null;
+        for (const [value, text] of block.action.select.options) {
+          const o = el('option', null, text);
+          o.value = value;
+          o.selected = value === rowDefault;
+          picker.append(o);
+        }
+        if (!block.action.select.options.some(([value]) => value === rowDefault)) picker.selectedIndex = 0;
+        td.append(picker);
+      }
       const btn = el('button', `row-action ${block.action.style || ''}`, block.action.label);
       btn.type = 'button';
       btn.disabled = Boolean(block.action.disabled);
       btn.addEventListener('click', () => {
         if (block.action.disabled) return;
         btn.disabled = true;
-        runAction(block.action.endpoint, { [block.action.column]: row[keyIndex] });
+        const body = { [block.action.column]: row[keyIndex], ...(block.action.extra || {}) };
+        if (picker) body[picker.name] = picker.value;
+        runAction(block.action.endpoint, body);
       });
       td.append(btn);
       r.append(td);
