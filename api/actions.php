@@ -270,3 +270,74 @@ function createSection(int $adminId, array $form): array
         return ['message' => "Created {$course['course_ID']} section $sectionNo (CRN $crn) for {$sem['semester_Name']}, taught by {$fac['name']}."];
     });
 }
+
+// A letter grade in Enrollment.grade/Student_History.grade, newest earned first (matches GRADE_ORDER).
+const VALID_GRADES = ['A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'F'];
+
+// A weekday letter for today, or null on a weekend (no section ever meets then).
+function todayLetter(): ?string
+{
+    return [1 => 'M', 2 => 'T', 3 => 'W', 4 => 'R', 5 => 'F'][(int) date('N')] ?? null;
+}
+
+// ---------- Faculty: take attendance for one student, in one of their own sections, today ----------
+function recordAttendance(int $facultyId, array $form): array
+{
+    $crn = registrationCrn($form['CRN'] ?? null);
+    $studentId = filter_var($form['student_ID'] ?? null, FILTER_VALIDATE_INT);
+    if ($studentId === false) fail('Choose a valid student.');
+    $status = (string) ($form['status'] ?? '');
+    if (!in_array($status, ['Present', 'Absent'], true)) fail('Choose Present or Absent.');
+
+    return transaction(function () use ($facultyId, $crn, $studentId, $status) {
+        $sec = one('SELECT s.start_Date, s.end_Date FROM Course_Section cs JOIN Semester s ON s.semester_ID = cs.semester_ID
+          WHERE cs.CRN = ? AND cs.faculty_ID = ?', [$crn, $facultyId]);
+        if (!$sec) fail('That is not one of your sections.');
+        if (!one('SELECT 1 AS ok FROM Enrollment WHERE CRN = ? AND student_ID = ?', [$crn, $studentId])) {
+            fail('That student is not enrolled in this section.');
+        }
+        $today = date('Y-m-d');
+        if ($today < $sec['start_Date'] || $today > $sec['end_Date']) {
+            fail("Today is outside {$sec['start_Date']} to {$sec['end_Date']}, this section's semester; attendance can only be taken while it is in session.");
+        }
+        $letter = todayLetter();
+        // Checked against every meeting this CRN has today (lecture or, for a four-credit
+        // Biology section, its separate lab), the same way a time clash is checked elsewhere.
+        $meetsToday = $letter !== null && one('SELECT 1 AS ok FROM ' . MEETINGS . ' m JOIN Time_Slot_Day d ON d.time_Slot_ID = m.time_Slot_ID
+          WHERE m.CRN = ? AND d.day_ID = ?', [$crn, $letter]);
+        if (!$meetsToday) fail('This section does not meet today; attendance can only be taken on a day it is scheduled to meet.');
+        run('INSERT INTO Attendance (student_ID, CRN, attendance_Date, attendance_Status) VALUES (?, ?, ?, ?)
+          ON DUPLICATE KEY UPDATE attendance_Status = VALUES(attendance_Status)', [$studentId, $crn, $today, $status]);
+        return ['message' => "Attendance saved: student $studentId marked $status for today."];
+    });
+}
+
+// ---------- Faculty: record/assign a grade for one student in one of their own sections ----------
+function recordGrade(int $facultyId, array $form): array
+{
+    $crn = registrationCrn($form['CRN'] ?? null);
+    $studentId = filter_var($form['student_ID'] ?? null, FILTER_VALIDATE_INT);
+    if ($studentId === false) fail('Choose a valid student.');
+    $grade = (string) ($form['grade'] ?? '');
+    if (!in_array($grade, VALID_GRADES, true)) fail('Choose a valid letter grade.');
+
+    return transaction(function () use ($facultyId, $crn, $studentId, $grade) {
+        $sec = one('SELECT s.semester_ID, s.semester_Name, s.grade_Start, s.grade_End,
+            CURDATE() BETWEEN s.grade_Start AND s.grade_End AS grading_open
+          FROM Course_Section cs JOIN Semester s ON s.semester_ID = cs.semester_ID
+          WHERE cs.CRN = ? AND cs.faculty_ID = ? FOR UPDATE', [$crn, $facultyId]);
+        if (!$sec) fail('That is not one of your sections.');
+        if (!one('SELECT 1 AS ok FROM Enrollment WHERE CRN = ? AND student_ID = ?', [$crn, $studentId])) {
+            fail('That student is not enrolled in this section.');
+        }
+        if (!$sec['grading_open']) {
+            fail("The grading window for {$sec['semester_Name']} is {$sec['grade_Start']} to {$sec['grade_End']}; no grades can be saved outside it.");
+        }
+        run('UPDATE Enrollment SET grade = ? WHERE CRN = ? AND student_ID = ?', [$grade, $crn, $studentId]);
+        // Student_History is the permanent transcript/prerequisite record; Enrollment.grade is the
+        // live value for the section the student is currently in. Keep both in sync.
+        run('INSERT INTO Student_History (student_ID, CRN, semester_ID, grade) VALUES (?, ?, ?, ?)
+          ON DUPLICATE KEY UPDATE grade = VALUES(grade)', [$studentId, $crn, $sec['semester_ID'], $grade]);
+        return ['message' => "Grade saved: student $studentId received $grade."];
+    });
+}
