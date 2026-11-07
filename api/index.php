@@ -116,6 +116,7 @@ switch (true) {
             'update-address' => $everyone, 'request-password-change' => $everyone,
             'verify-password-code' => $everyone, 'complete-password-change' => $everyone,
             'create-section' => ['Admin'], 'create-user' => ['Admin'], 'send-password-reset' => ['Admin'],
+            'record-attendance' => ['Faculty'], 'record-grade' => ['Faculty'],
         ];
         if (!in_array($user['role'], $allowed[$m[1]] ?? [], true)) respond(403, ['error' => 'Your role cannot do that.']);
         respond(200, match ($m[1]) {
@@ -134,6 +135,8 @@ switch (true) {
             'create-section' => createSection($user['id'], $body),
             'create-user' => createUser($user['id'], $body),
             'send-password-reset' => adminSendReset($user['id'], $body),
+            'record-attendance' => recordAttendance($user['id'], $body),
+            'record-grade' => recordGrade($user['id'], $body),
         });
 
     default:
