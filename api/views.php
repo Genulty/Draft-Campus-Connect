@@ -402,6 +402,34 @@ function viewTeaching(array $u, array $q): array
           JOIN Login l ON l.user_ID = e.student_ID
           LEFT JOIN Attendance a ON a.CRN = e.CRN AND a.student_ID = e.student_ID
           WHERE e.CRN = ? GROUP BY u.user_ID, st.student_Year, l.user_Email ORDER BY u.last_Name", [$s['CRN']]);
+
+        // Take attendance: only saves on a day this section actually meets, while its semester is
+        // in session (record-attendance checks both; the button is always shown, same as "Try" on
+        // the student's Register page, so attempting it outside the window is how you see why).
+        $attendance = table("Take attendance: {$s['course_ID']} (CRN {$s['CRN']})", "SELECT u.user_ID AS `Student ID`,
+            CONCAT(u.first_Name, ' ', u.last_Name) AS Student,
+            COALESCE(a.attendance_Status, '—') AS `Today's status`
+          FROM Enrollment e JOIN User u ON u.user_ID = e.student_ID
+          LEFT JOIN Attendance a ON a.CRN = e.CRN AND a.student_ID = e.student_ID AND a.attendance_Date = CURDATE()
+          WHERE e.CRN = ? ORDER BY u.last_Name", [$s['CRN']],
+            "Only saved for today, and only while this section is actually meeting.");
+        $attendance['action'] = ['label' => 'Save', 'endpoint' => 'record-attendance', 'column' => 'Student ID',
+            'extra' => ['CRN' => $s['CRN']],
+            'select' => ['name' => 'status', 'defaultColumn' => "Today's status",
+                'options' => [['Present', 'Present'], ['Absent', 'Absent']]]];
+        $blocks[] = $attendance;
+
+        // Enter grades: only saves while the semester's grading window (Semester.grade_Start to
+        // grade_End) is open; record-grade enforces it and leaves an existing grade untouched otherwise.
+        $grading = table("Enter grades: {$s['course_ID']} (CRN {$s['CRN']})", "SELECT u.user_ID AS `Student ID`,
+            CONCAT(u.first_Name, ' ', u.last_Name) AS Student, COALESCE(e.grade, '—') AS `Current grade`
+          FROM Enrollment e JOIN User u ON u.user_ID = e.student_ID WHERE e.CRN = ? ORDER BY u.last_Name", [$s['CRN']],
+            'Only saved while the grading window for this semester is open.');
+        $grading['action'] = ['label' => 'Save', 'endpoint' => 'record-grade', 'column' => 'Student ID',
+            'extra' => ['CRN' => $s['CRN']],
+            'select' => ['name' => 'grade', 'defaultColumn' => 'Current grade',
+                'options' => array_map(fn ($g) => [$g, $g], VALID_GRADES)]];
+        $blocks[] = $grading;
     }
     return ['title' => "Welcome, {$u['name']}", 'subtitle' => $f['specialty'] ? "Specialty: {$f['specialty']}" : '', 'blocks' => $blocks];
 }
