@@ -52,13 +52,40 @@ async function openView(id, params = {}, flash = null, historyMode = 'push') {
     history[historyMode === 'replace' ? 'replaceState' : 'pushState'](null, '', hash);
   }
   const blocks = document.getElementById('page-blocks');
-  blocks.innerHTML = '<p class="muted">Loading…</p>';
-  const res = await fetch(`/api/views/${id}${qs ? `?${qs}` : ''}`);
+  const title = document.getElementById('page-title');
+  const subtitle = document.getElementById('page-subtitle');
+  title.parentElement.dataset.view = id;
+  if (id === 'overview') {
+    title.textContent = 'Loading your dashboard…';
+    subtitle.textContent = '';
+  }
+  const loading = el('p', 'view-loading', 'Loading…');
+  loading.setAttribute('role', 'status');
+  blocks.replaceChildren(loading);
+  const isCurrent = () => requestId === viewRequestId && !blocks.closest('[hidden]');
+  let res, page;
+  try {
+    res = await fetch(`/api/views/${id}${qs ? `?${qs}` : ''}`);
+    if (!isCurrent()) return;
+    if (res.status === 401) return showLogin();
+    page = await res.json();
+  } catch {
+    if (!isCurrent()) return;
+    page = { error: 'The page could not load. Try again.' };
+  }
   // Ignore older responses when another lookup or filter request has started.
-  if (requestId !== viewRequestId) return;
-  if (res.status === 401) return showLogin();
-  const page = await res.json();
-  if (currentView !== id || requestId !== viewRequestId) return;
+  if (!isCurrent()) return;
+  if (!res || res.status >= 400 || !page || page.error) {
+    title.textContent = 'Page unavailable';
+    subtitle.textContent = '';
+    const error = renderFlash({ ok: false, heading: 'Page unavailable', message: page?.error || 'Try again.' });
+    error.setAttribute('role', 'alert');
+    const retry = el('button', 'view-retry', 'Retry');
+    retry.type = 'button';
+    retry.addEventListener('click', () => openView(id, params, flash, 'replace'));
+    blocks.replaceChildren(error, retry);
+    return;
+  }
   // Use the server-validated Master Schedule choices for refreshes and future filter changes.
   if (id === 'master-schedule' && res.ok) {
     const filters = (page.blocks || []).find((b) => b.type === 'filters')?.filters || [];
@@ -68,9 +95,185 @@ async function openView(id, params = {}, flash = null, historyMode = 'push') {
       history.replaceState(null, '', `#${id}?${new URLSearchParams(currentParams)}`);
     }
   }
-  document.getElementById('page-title').textContent = page.title || page.error;
-  document.getElementById('page-subtitle').textContent = page.subtitle || '';
+  title.textContent = page.title;
+  subtitle.textContent = page.subtitle || '';
   blocks.replaceChildren(...(flash ? [renderFlash(flash)] : []), ...(page.blocks || []).map((b) => renderBlock(b, id)));
+}
+
+function renderStudentOverview(overview, viewId) {
+  const root = el('div', 'student-overview');
+  const section = (id, title, note) => {
+    const panel = el('section', 'overview-panel');
+    const heading = el('h3', null, title);
+    heading.id = id;
+    panel.setAttribute('aria-labelledby', id);
+    panel.append(heading);
+    if (note) panel.append(el('p', 'overview-note', note));
+    return panel;
+  };
+
+  const summary = section('overview-summary', 'Academic summary');
+  const summaryHead = el('div', 'overview-summary-head');
+  summaryHead.append(summary.firstChild);
+  if (overview.filter) {
+    const filter = renderBlock(overview.filter, viewId, async (params) => {
+      const request = openView(viewId, params);
+      const requestId = viewRequestId;
+      await request;
+      if (requestId === viewRequestId && document.activeElement === document.body) {
+        document.querySelector('.overview-summary-head select')?.focus();
+      }
+    });
+    summaryHead.append(filter);
+  }
+  summary.append(summaryHead);
+
+  const metrics = el('dl', 'overview-metrics');
+  const metric = (label, value, note, details) => {
+    const card = el('div', 'overview-metric');
+    const body = el('dd');
+    body.append(el('div', 'overview-value', value));
+    if (note) body.append(el('p', 'overview-note', note));
+    if (details?.length) {
+      const list = el('ul', 'overview-details');
+      for (const detail of details) list.append(el('li', null, detail));
+      body.append(list);
+    }
+    card.append(el('dt', null, label), body);
+    metrics.append(card);
+  };
+
+  for (const [kind, empty] of [['Major', 'Not on file'], ['Minor', 'None declared']]) {
+    const programs = overview.programs.filter(p => p.kind === kind);
+    const names = programs.map(p => p.name + (p.is_primary && programs.length > 1 ? ' (primary)' : ''));
+    const missingDeclaration = programs.some(p => !p.declared);
+    metric(kind, names.length > 1 ? `${names.length} on file` : names[0] || empty,
+      missingDeclaration ? 'The primary major is on file without a declaration link.' : null,
+      names.length > 1 ? names : null);
+  }
+
+  const count = overview.sections.length;
+  metric('Cumulative GPA', overview.gpa ?? 'Unavailable', overview.gpa === null ? 'No GPA is available from course history.' : 'Based on course history.');
+  metric('Credits earned', overview.provisional_credits, 'Provisional passing-course credits from Degree Audit.',
+    overview.stored_credits === null ? null : [`Student record total: ${overview.stored_credits}`]);
+  metric(overview.semester ? `${overview.semester} classes` : 'Semester classes',
+    overview.semester ? `${count} registered ${count === 1 ? 'section' : 'sections'}` : 'Unavailable',
+    overview.semester ? `${overview.enrolled_credits} enrolled credits` : 'No semesters are on file.');
+  metric('Hold records on file', overview.hold_count, 'Current status is unavailable.',
+    overview.holds.map(hold => `${hold.type}: ${hold.status}`));
+  summary.append(metrics);
+  root.append(summary);
+
+  const shortcuts = el('nav', 'overview-panel overview-shortcuts');
+  shortcuts.setAttribute('aria-labelledby', 'overview-actions');
+  const shortcutHeading = el('h3', null, 'Quick actions');
+  shortcutHeading.id = 'overview-actions';
+  const links = el('div', 'overview-links');
+  for (const id of ['schedule', 'register', 'degree-audit', 'grades', 'transcript']) {
+    const navLink = document.querySelector(`#nav [data-view="${id}"]`);
+    if (!navLink) continue;
+    const link = el('a', null, navLink.textContent);
+    link.href = navLink.getAttribute('href');
+    link.addEventListener('click', async event => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      const request = openView(id);
+      const requestId = viewRequestId;
+      await request;
+      if (requestId === viewRequestId && !dashboardPage.hidden && document.activeElement === document.body) {
+        document.getElementById('page-title').focus();
+      }
+    });
+    links.append(link);
+  }
+  shortcuts.append(shortcutHeading, links);
+  root.append(shortcuts);
+
+  const weekly = section('overview-weekly', 'Weekly timetable', overview.semester);
+  weekly.classList.add('overview-timetable');
+  const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+  const byDay = new Map(weekdays.map(day => [day, []]));
+  let meetingCount = 0;
+  for (const course of overview.sections) {
+    for (const meeting of course.meetings) {
+      if (!meeting.day || !meeting.time) continue;
+      if (!byDay.has(meeting.day)) byDay.set(meeting.day, []);
+      byDay.get(meeting.day).push({ ...meeting, course });
+      meetingCount++;
+    }
+  }
+
+  if (meetingCount) {
+    const week = el('div', 'overview-week');
+    for (const day of [...weekdays, 'Saturday', 'Sunday']) {
+      const meetings = byDay.get(day);
+      if (!meetings) continue;
+      const column = el('div', 'overview-day');
+      column.append(el('h4', null, day));
+      if (!meetings.length) column.append(el('p', 'overview-note overview-no-meetings', 'No classes'));
+      else {
+        const list = el('ul', 'overview-meetings');
+        meetings.sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+        for (const meeting of meetings) {
+          const item = el('li', 'overview-meeting');
+          item.append(el('span', 'overview-meeting-time', meeting.time),
+            el('strong', null, meeting.course.code),
+            el('span', null, meeting.course.title),
+            el('span', 'overview-note', meeting.room ?? 'Room unavailable'),
+            el('span', 'overview-meeting-kind', `${meeting.kind} · CRN ${meeting.course.crn}`));
+          list.append(item);
+        }
+        column.append(list);
+      }
+      week.append(column);
+    }
+    weekly.append(week);
+  } else {
+    weekly.append(el('p', 'overview-empty', count ? 'No meeting days and times are on file for these sections.' :
+      overview.semester ? 'You have no registered sections for this semester.' : 'No semester is available.'));
+  }
+  root.append(weekly);
+
+  // Group each meeting type by time and room for the table, keeping one row per CRN.
+  const meetingColumns = (course, kind) => {
+    const groups = new Map();
+    for (const meeting of course.meetings.filter(m => m.kind === kind)) {
+      const key = JSON.stringify([meeting.time, meeting.room]);
+      if (!groups.has(key)) groups.set(key, { time: meeting.time, room: meeting.room, days: new Set() });
+      if (meeting.day) groups.get(key).days.add(meeting.day.slice(0, 3));
+    }
+    if (!groups.size) return [null, null, null];
+    const entries = [...groups.values()];
+    return [entries.map(m => [...m.days].join(', ') || '—').join('\n'),
+      entries.map(m => m.time ?? '—').join('\n'), entries.map(m => m.room ?? '—').join('\n')];
+  };
+  const table = renderBlock({
+    type: 'table',
+    title: overview.semester ? `${overview.semester} schedule` : 'Semester schedule',
+    columns: ['CRN', 'Course', 'Title', 'Section', 'Credits', 'Level', 'Days', 'Instructor', 'Time', 'Room', 'Lab days', 'Lab time', 'Lab room'],
+    rows: overview.sections.map(course => {
+      const [days, time, room] = meetingColumns(course, 'Lecture');
+      return [course.crn, course.code, course.title, course.section, course.credits, course.level,
+        days, course.instructor, time, room, ...meetingColumns(course, 'Lab')];
+    }),
+  }, viewId);
+  table.classList.add('overview-schedule');
+  const tableHeading = table.querySelector('h3');
+  tableHeading.id = 'overview-schedule';
+  table.querySelector('.table-head span').textContent = `${count} ${count === 1 ? 'section' : 'sections'}`;
+  if (count) {
+    const wrap = table.querySelector('.table-wrap');
+    wrap.tabIndex = 0;
+    wrap.setAttribute('role', 'region');
+    wrap.setAttribute('aria-labelledby', tableHeading.id);
+    wrap.before(el('p', 'overview-note overview-scroll-hint', 'Scroll the table horizontally to see all columns.'));
+    wrap.querySelectorAll('th').forEach(th => { th.scope = 'col'; });
+  } else {
+    table.querySelector('.empty-row').textContent = overview.semester ?
+      'Registered sections for this semester will appear here.' : 'No semester is available.';
+  }
+  root.append(table);
+  return root;
 }
 
 // Student audit: recorded progress is separated from policies the database cannot establish.
@@ -208,6 +411,7 @@ function el(tag, className, text) {
 
 // onFilter: what a filter change does. By default it reloads the dashboard page with the new values.
 function renderBlock(block, viewId, onFilter = (params) => openView(viewId, params)) {
+  if (block.type === 'student-overview') return renderStudentOverview(block, viewId);
   if (block.type === 'degree-audit') return renderDegreeAudit(block.audit);
   if (block.type === 'stats') {
     const grid = el('div', 'stats');

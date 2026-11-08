@@ -117,38 +117,116 @@ function shortDate(string $date): string
 
 // ---------------- Student ----------------
 
+// One read of the selected registrations and their recorded lecture/lab meetings.
+// The outer joins keep registered sections visible even when schedule details are missing.
+function overviewSections(int $studentId, string $semesterId): array
+{
+    $records = rows("WITH registered AS (
+        SELECT cs.CRN, cs.course_ID AS code, c.course_Name AS title, cs.section_No AS section,
+          c.course_Credits AS credits, " . COURSE_LEVEL . " AS level,
+          " . INSTRUCTOR . ", cs.time_Slot_ID, cs.room_ID
+        FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN
+        JOIN Course c ON c.course_ID = cs.course_ID
+        LEFT JOIN User fu ON fu.user_ID = cs.faculty_ID
+        WHERE e.student_ID = ? AND cs.semester_ID = ?
+      ), meeting_slots AS (
+        SELECT CRN, time_Slot_ID, room_ID, 'Lecture' AS kind FROM registered
+        UNION ALL
+        SELECT lab.CRN, lab.time_Slot_ID, lab.lab_ID, 'Lab'
+        FROM registered JOIN Course_Section_Lab lab USING (CRN)
+      )
+      SELECT DISTINCT reg.CRN, reg.code, reg.title, reg.section, reg.credits, reg.level, reg.Instructor AS instructor,
+        ms.kind, d.week_Day AS day, p.start_Time AS starts_at, p.end_Time AS ends_at,
+        CONCAT(TIME_FORMAT(p.start_Time, '%l:%i %p'), ' – ', TIME_FORMAT(p.end_Time, '%l:%i %p')) AS time_label,
+        CONCAT(b.building_Name, ' ', r.room_No) AS room
+      FROM registered reg JOIN meeting_slots ms USING (CRN)
+      LEFT JOIN Time_Slot_Day tsd ON tsd.time_Slot_ID = ms.time_Slot_ID
+      LEFT JOIN Day d ON d.day_ID = tsd.day_ID
+      LEFT JOIN Time_Slot_Period tsp ON tsp.time_Slot_ID = ms.time_Slot_ID
+      LEFT JOIN Period p ON p.period_ID = tsp.period_ID
+      LEFT JOIN Room r ON r.room_ID = ms.room_ID
+      LEFT JOIN Building b ON b.building_ID = r.building_ID
+      ORDER BY reg.code, reg.CRN, ms.kind, p.start_Time, p.end_Time,
+        FIELD(d.week_Day, 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'), d.week_Day",
+        [$studentId, $semesterId]);
+
+    $sections = [];
+    foreach ($records as $record) {
+        $crn = $record['CRN'];
+        $sections[$crn] ??= [
+            'crn' => $crn, 'code' => $record['code'], 'title' => $record['title'], 'section' => $record['section'],
+            'credits' => $record['credits'], 'level' => $record['level'], 'instructor' => $record['instructor'],
+            'meetings' => [],
+        ];
+        $sections[$crn]['meetings'][] = [
+            'kind' => $record['kind'], 'day' => $record['day'], 'starts_at' => $record['starts_at'],
+            'time' => $record['time_label'], 'room' => $record['room'],
+        ];
+    }
+    return array_values($sections);
+}
+
 function viewOverview(array $u, array $q): array
 {
-    $s = one('SELECT s.student_Year, s.student_Type,
-        COALESCE(ug.undergraduate_Student_Type, g.graduate_Student_Type) AS load_type,
-        COALESCE(ft.credits_Earned, pt.credits_Earned, fg.credits_Earned, pg.credits_Earned) AS credits,
-        (SELECT GROUP_CONCAT(m.major_Name SEPARATOR \', \') FROM Student_Major sm JOIN Major m ON m.major_ID = sm.major_ID WHERE sm.student_ID = s.student_ID) AS majors,
-        (SELECT GROUP_CONCAT(m.minor_Name SEPARATOR \', \') FROM Student_Minor sm JOIN Minor m ON m.minor_ID = sm.minor_ID WHERE sm.student_ID = s.student_ID) AS minors
-      FROM Student s
-      LEFT JOIN Undergraduate_Student ug ON ug.student_ID = s.student_ID
-      LEFT JOIN Graduate_Student g ON g.student_ID = s.student_ID
-      LEFT JOIN Full_Time_Undergraduate ft ON ft.student_ID = s.student_ID
-      LEFT JOIN Part_Time_Undergraduate pt ON pt.student_ID = s.student_ID
-      LEFT JOIN Full_Time_Graduate_Student fg ON fg.student_ID = s.student_ID
-      LEFT JOIN Part_Time_Graduate_Student pg ON pg.student_ID = s.student_ID
-      WHERE s.student_ID = ?', [$u['id']]);
+    $studentId = (int) $u['id'];
+    $audit = loadDegreeAudit($studentId);
+    $page = ['title' => "Welcome, {$u['name']}", 'subtitle' => '', 'blocks' => []];
+    if ($audit === null) {
+        $page['blocks'][] = ['type' => 'message', 'ok' => false, 'heading' => 'Academic profile unavailable',
+            'message' => 'No student academic profile is recorded for this account.'];
+        return $page;
+    }
+
+    $profile = $audit['profile'];
+    $page['subtitle'] = implode(' · ', array_filter([$profile['type'], $profile['year'], $profile['enrollment_status']]));
     $gpa = one('SELECT ROUND(SUM(' . GPA_POINTS . ' * c.course_Credits) / SUM(c.course_Credits), 2) AS gpa
       FROM Student_History h JOIN Course_Section cs ON cs.CRN = h.CRN JOIN Course c ON c.course_ID = cs.course_ID
-      WHERE h.student_ID = ?', [$u['id']]);
-    $cur = currentSemester();
-    $now = one('SELECT COUNT(*) AS n, COALESCE(SUM(c.course_Credits), 0) AS credits FROM Enrollment e
-      JOIN Course_Section cs ON cs.CRN = e.CRN JOIN Course c ON c.course_ID = cs.course_ID
-      WHERE e.student_ID = ? AND cs.semester_ID = ?', [$u['id'], $cur['id']]);
-    $holds = one('SELECT COUNT(*) AS n FROM Student_Hold WHERE student_ID = ?', [$u['id']]);
-    return [
-        'title' => "Welcome, {$u['name']}",
-        'subtitle' => "{$s['student_Type']} · {$s['student_Year']} · {$s['load_type']} · " . ($holds['n'] ? 'Hold' : 'No hold'),
-        'blocks' => [
-            stats([['Major', $s['majors']], ['Minor', $s['minors'] ?: 'None'], ['GPA', $gpa['gpa']], ['Credits earned', $s['credits']],
-                ["{$cur['name']} classes", "{$now['n']} ({$now['credits']} credits)"], ['Active holds', $holds['n']]]),
-            studentSchedule("{$cur['name']} schedule", $u['id'], $cur['id']),
-        ],
+      WHERE h.student_ID = ?', [$studentId])['gpa'];
+
+    $semesters = rows('SELECT semester_ID AS id, semester_Name AS name, start_Date <= CURDATE() AS started
+      FROM Semester ORDER BY start_Date, semester_ID');
+    $semester = $semesters[0] ?? null;
+    foreach ($semesters as $term) {
+        if ($term['id'] === ($q['semester'] ?? null)) {
+            $semester = $term;
+            break;
+        }
+        if ($term['started']) $semester = $term;
+    }
+
+    $sections = $semester ? overviewSections($studentId, $semester['id']) : [];
+    $courseCredits = array_column($sections, 'credits', 'code');
+    $holdTypes = array_column(rows("SELECT h.hold_Type AS type, sh.hold_Date AS placed
+      FROM Hold h LEFT JOIN Student_Hold sh ON sh.hold_ID = h.hold_ID AND sh.student_ID = ?
+      ORDER BY h.hold_Type", [$studentId]), 'placed', 'type');
+    $holdRecords = array_filter($holdTypes, static fn ($date) => $date !== null);
+    $holdDetails = [];
+    foreach (array_unique(['Academic', 'Disciplinary', ...array_keys($holdRecords)]) as $type) {
+        $holdDetails[] = ['type' => $type, 'status' => match (true) {
+            !array_key_exists($type, $holdTypes) => 'Hold type unavailable',
+            $holdTypes[$type] === null => 'No record on file',
+            default => 'Filed ' . shortDate($holdTypes[$type]),
+        }];
+    }
+
+    $page['blocks'][] = [
+        'type' => 'student-overview',
+        'semester' => $semester['name'] ?? null,
+        'filter' => $semester ? ['type' => 'filters', 'filters' => [
+            ['name' => 'semester', 'label' => 'Semester', 'value' => $semester['id'],
+                'options' => array_map(static fn ($term) => [$term['id'], $term['name']], $semesters)],
+        ]] : null,
+        'programs' => array_map(static fn ($program) => array_intersect_key($program, array_flip(['kind', 'name', 'is_primary', 'declared'])),
+            $audit['programs']),
+        'gpa' => $gpa === null ? null : number_format((float) $gpa, 2, '.', ''),
+        'provisional_credits' => $audit['credits']['earned_provisional'],
+        'stored_credits' => $profile['stored_credits'] === null ? null : (int) $profile['stored_credits'],
+        'enrolled_credits' => array_sum($courseCredits),
+        'hold_count' => count($holdRecords),
+        'holds' => $holdDetails,
+        'sections' => $sections,
     ];
+    return $page;
 }
 
 function viewSchedule(array $u, array $q): array

@@ -14,6 +14,7 @@ function run(string $sql, array $params = []): PDOStatement
 function rows(string $sql,array $params=[]): array { return run($sql,$params)->fetchAll(); }
 function one(string $sql,array $params=[]): ?array { return run($sql,$params)->fetch() ?: null; }
 function check(bool $ok,string $message): void { if (!$ok) throw new RuntimeException($message); }
+require __DIR__.'/../api/actions.php';
 require __DIR__.'/../api/views.php';
 set_error_handler(static function ($severity,$message,$file,$line): never { throw new ErrorException($message,0,$severity,$file,$line); });
 function fingerprints(): array {
@@ -46,6 +47,10 @@ check(count($fa26Labs)===6 && count(array_unique(array_column($fa26Labs,'owner')
 check(array_column($fa26Labs,'CRN')===[10469,10470,10471,10479,10480,10481],'FA26 lab CRNs differ from inspected records');
 $expected=[];
 foreach ([...$lectures,...$labs] as $row) $expected[$row['owner']][$row['semester']][]=$row;
+$rosterStudents=[];
+foreach (rows('SELECT CRN, student_ID FROM Enrollment ORDER BY CRN, student_ID') as $enrollment) {
+    $rosterStudents[$enrollment['CRN']][]=(int)$enrollment['student_ID'];
+}
 $browserIds=array_values(array_unique([...array_column($fa26Labs,'owner'),$faculty[0]['faculty_ID']]));
 $browser=[];$checks=0;$seenFa26=[];
 foreach ($faculty as $person) foreach ($semesters as $semester) {
@@ -63,20 +68,43 @@ foreach ($faculty as $person) foreach ($semesters as $semester) {
         $actual[]=json_encode(array_map(fn($v)=>$v===null ? null : (string)$v,$row));
         if ($sem==='FA26' && $named['Meeting']==='Lab') $seenFa26[]=$named['CRN'];
     }
-    $reference=[];$parentCrns=[];
+    $reference=[];$parentSections=[];
     foreach ($expected[$id][$sem] ?? [] as $row) {
         $reference[]=json_encode(array_map(fn($key)=>$row[$key]===null ? null : (string)$row[$key],$table['columns']));
-        $parentCrns[]=$row['CRN'];
+        $parentSections[$row['CRN']]=$row['Course'];
     }
     sort($actual);sort($reference);
     check($actual===$reference,"Incorrect meeting data or faculty/semester leakage: $id/$sem");
-    $sectionCount=count(array_unique($parentCrns));
-    check($page['blocks'][1]['items'][4]['value']===$sectionCount,'Labs inflated section count');
-    check(count($page['blocks'])===3+$sectionCount,'Roster duplicated for a lab or wrong semester');
-    foreach (array_slice($page['blocks'],3) as $roster) {
-        check((bool)preg_match('/CRN (\d+)\)/',$roster['title'],$match),'Unexpected roster title');
-        check(in_array((int)$match[1],$parentCrns,true),'Roster is outside selected faculty/semester');
+    check($page['blocks'][1]['items'][4]['value']===count($parentSections),'Labs inflated section count');
+
+    // Each parent section has one roster and its own attendance and grading panels.
+    $expectedPanels=[];
+    foreach ($parentSections as $crn=>$course) {
+        $sectionLabel="$course (CRN $crn)";
+        $expectedPanels["Roster: $sectionLabel"]=[$crn,null];
+        $expectedPanels["Take attendance: $sectionLabel"]=[$crn,'record-attendance'];
+        $expectedPanels["Enter grades: $sectionLabel"]=[$crn,'record-grade'];
     }
+    foreach (array_slice($page['blocks'],3) as $panel) {
+        $title=$panel['title'];
+        check(isset($expectedPanels[$title]),"Unexpected or duplicate panel for $id/$sem: $title");
+        [$crn,$endpoint]=$expectedPanels[$title];
+        unset($expectedPanels[$title]);
+
+        $studentColumn=array_search('Student ID',$panel['columns'],true);
+        check($studentColumn!==false,"Missing Student ID column: $title");
+        $studentIds=array_map('intval',array_column($panel['rows'],$studentColumn));
+        sort($studentIds,SORT_NUMERIC);
+        check($studentIds===($rosterStudents[$crn] ?? []),"Incorrect enrollment or duplicate student: $title");
+        $action=$panel['action'] ?? null;
+        if ($endpoint===null) {
+            check($action===null,"Roster must be read-only: $title");
+        } else {
+            check(($action['endpoint'] ?? null)===$endpoint && ($action['column'] ?? null)==='Student ID'
+                && ($action['extra']['CRN'] ?? null)===$crn,"Incorrect panel action or CRN: $title");
+        }
+    }
+    check($expectedPanels===[],"Missing roster, attendance, or grading panel for $id/$sem");
     if (in_array($id,$browserIds,true)) $browser[$id]['pages'][$sem]=[
         'title'=>"Faculty $id teaching schedule", 'blocks'=>[$page['blocks'][0],$table],
     ];
@@ -118,6 +146,6 @@ check($before===fingerprints(),'Existing schedules, assignments, or enrollments 
 if (($argv[1] ?? '')==='--browser-fixture') {
     echo json_encode(['faculty'=>$browser,'defaultSemester'=>$current['id']],JSON_THROW_ON_ERROR);exit;
 }
-echo "PASS: $checks faculty/semester combinations; all lecture/lab fields match independent SELECTs; six FA26 labs across five faculty; no duplicates, no account/semester leakage, correct section counts/rosters, malformed-filter fallback and role guards.\n";
+echo "PASS: $checks faculty/semester combinations; all lecture/lab fields match independent SELECTs; six FA26 labs across five faculty; no duplicates, no account/semester leakage, correct section counts, roster membership, attendance/grading panel scope, malformed-filter fallback and role guards.\n";
 foreach ($fa26Labs as $row) echo json_encode(array_intersect_key($row,array_flip(['owner','CRN','Course','Days','Time','Room','Instructor'])),JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES).PHP_EOL;
 echo "PASS: scheduling/assignment/enrollment fingerprints unchanged. SELECT-only: no schema/data changes or transactions. Inherited lab instructor is the recorded parent-section faculty; separate lab assignments are not stored.\n";

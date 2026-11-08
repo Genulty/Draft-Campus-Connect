@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=8">
+  <link rel="stylesheet" href="styles.css?v=9">
 </head>
 <body>
   <!-- Welcome page (shown to visitors who are not signed in) -->
@@ -145,15 +145,16 @@
     <main class="main">
       <header class="topbar"><span class="badge" id="me-role"></span><span class="muted small" id="me-id"></span></header>
       <section class="content">
-        <div>
-          <h2 id="page-title"></h2>
+        <header class="page-heading">
+          <p class="overview-kicker">Student overview</p>
+          <h2 id="page-title" tabindex="-1"></h2>
           <p class="muted" id="page-subtitle"></p>
-        </div>
+        </header>
         <div id="page-blocks"></div>
       </section>
     </main>
   </div>
 
-  <script src="login.js?v=8"></script>
+  <script src="login.js?v=9"></script>
 </body>
 </html>

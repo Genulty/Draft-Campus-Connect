@@ -103,6 +103,140 @@ tbody tr:hover { background: #f8f9fc; }
   .foot { display: none; }
 }
 
+/* ---------- Student Overview ---------- */
+.overview-kicker { display: none; }
+.page-heading[data-view="overview"] {
+  padding: clamp(18px, 3vw, 30px);
+  border: 1px solid #dbe4f2;
+  border-left: 4px solid #2b5aa6;
+  border-radius: 12px;
+  background: #edf3fc;
+  overflow-wrap: anywhere;
+}
+.page-heading[data-view="overview"] .overview-kicker {
+  display: block;
+  margin: 0 0 7px;
+  color: #365681;
+  font-size: .75rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.page-heading[data-view="overview"] #page-title { color: #16294d; font-size: clamp(1.5rem, 2.7vw, 2.15rem); }
+.page-heading[data-view="overview"] #page-subtitle { margin-top: 7px; color: #435675; }
+.page-heading[data-view="overview"] #page-subtitle:empty { display: none; }
+#page-blocks > .view-retry { align-self: flex-start; min-height: 44px; }
+.view-loading { color: #4b5a73; }
+
+.student-overview { display: grid; gap: 16px; min-width: 0; }
+.overview-panel, .overview-schedule {
+  min-width: 0;
+  border: 1px solid #dfe5ef;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 2px 5px rgba(22, 41, 77, .04);
+}
+.overview-panel { padding: clamp(14px, 2vw, 22px); }
+.overview-panel h3, .overview-schedule .table-head h3 { margin: 0; color: #16294d; font-size: 1.08rem; }
+.overview-note { color: #4b5a73; font-size: .82rem; line-height: 1.45; }
+.overview-summary-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-bottom: 14px;
+}
+.overview-summary-head label { flex-wrap: wrap; }
+.overview-summary-head select { max-width: 100%; min-height: 44px; color: #16294d; }
+.overview-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+.overview-metric {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #dfe5ef;
+  border-radius: 8px;
+  background: #f7f9fc;
+  overflow-wrap: anywhere;
+}
+.overview-metric dt {
+  margin-bottom: 7px;
+  color: #435675;
+  font-size: .75rem;
+  font-weight: 700;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+}
+.overview-metric dd { margin: 0; }
+.overview-value { color: #16294d; font-size: 1.15rem; font-weight: 700; line-height: 1.35; }
+.overview-details { margin: 6px 0 0; padding-left: 17px; color: #435675; font-size: .82rem; line-height: 1.5; }
+.overview-shortcuts { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 18px; }
+.overview-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.overview-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 6px 13px;
+  border: 1px solid #cbd8ed;
+  border-radius: 8px;
+  background: #f4f7fc;
+  color: #1f3a68;
+  font-size: .86rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+.overview-links a:hover { background: #e4eefb; text-decoration: underline; }
+.student-overview :focus-visible { outline: 2px solid #2b5aa6; outline-offset: 2px; }
+
+.overview-timetable, .overview-schedule { container-type: inline-size; }
+.overview-week { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.overview-day { min-width: 0; padding: 9px; border: 1px solid #e2e8f1; border-radius: 8px; background: #f7f9fc; }
+.overview-day h4 { margin: 0 0 9px; padding: 3px 2px 7px; border-bottom: 1px solid #dce4f1; color: #263f67; font-size: .86rem; }
+.overview-meetings { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.overview-meeting {
+  display: grid;
+  gap: 4px;
+  padding: 9px;
+  border: 1px solid #dce4f1;
+  border-left: 3px solid #5378ae;
+  border-radius: 6px;
+  background: #fff;
+  font-size: .84rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.overview-meeting-time { color: #365681; font-size: .78rem; font-weight: 700; }
+.overview-meeting-kind { color: #435675; font-size: .75rem; font-weight: 600; }
+.overview-no-meetings { padding: 0 2px 4px; }
+.overview-empty { margin-top: 12px; color: #4b5a73; }
+.overview-schedule .empty-row, .overview-schedule .table-head .muted { color: #4b5a73; }
+.overview-schedule .table-wrap:focus-visible { outline-offset: -3px; }
+.overview-schedule table { min-width: 84rem; }
+.overview-schedule th { background: #edf3fc; }
+.overview-schedule td { vertical-align: top; }
+.overview-schedule td:nth-child(3),
+.overview-schedule td:nth-child(8),
+.overview-schedule td:nth-child(10),
+.overview-schedule td:nth-child(13) {
+  min-width: 8rem;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.overview-schedule td:nth-child(3) { min-width: 11rem; }
+.overview-schedule td:is(:nth-child(7), :nth-child(9), :nth-child(11), :nth-child(12)) { white-space: pre; }
+.overview-scroll-hint { margin: 0; padding: 0 16px 10px; }
+@container (min-width: 84rem) { .overview-scroll-hint { display: none; } }
+@container (min-width: 52rem) {
+  .overview-week { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+}
+@container (max-width: 34rem) { .overview-week { grid-template-columns: 1fr; } }
+@media (max-width: 750px) { .overview-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .overview-metrics { grid-template-columns: 1fr; } }
+
 /* ---------- Welcome page ---------- */
 a.brand { text-decoration: none; }
 .back-home { color: #a9bddf; font-size: .9rem; text-decoration: none; }
