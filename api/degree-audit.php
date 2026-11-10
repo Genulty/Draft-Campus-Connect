@@ -132,7 +132,7 @@ function calculateDegreeAudit(array $profile, array $programs, array $requiremen
             $requirement['attempts'] = array_map(static fn ($a) => ['grade' => $a['grade'], 'semester' => $a['semester'], 'crn' => $a['crn']], $attempts[$code] ?? []);
             $requirement['met'] = $met;
             $requirement['status'] = match (true) {
-                $met => 'Met in records',
+                $met => 'Complete',
                 $minimum === null || isset($reviewCourses[$code]) => 'Review needed',
                 isset($activeByCode[$code]) => 'In progress',
                 isset($futureByCode[$code]) => 'Registered for future semester',
