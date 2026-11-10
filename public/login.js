@@ -333,7 +333,7 @@ function renderDegreeAudit(audit) {
       }
       card.append(auditTable('Required courses', ['Course', 'Title', 'Credits', 'Minimum grade', 'Best recorded grade', 'Transcript attempts', 'Status'],
         program.requirements.map(r => [r.code, r.title, r.credits, r.minimum_grade, r.best_grade ?? '—',
-          r.attempts.map(a => `${a.grade} · ${a.semester}`).join('; ') || 'None recorded', r.status]), 'No requirement mappings are stored for this program. Completion is unavailable.'));
+          r.attempts.map(a => a.semester).join('; ') || 'None recorded', r.status]), 'No requirement mappings are stored for this program. Completion is unavailable.'));
       group.append(card);
     }
     root.append(group);
