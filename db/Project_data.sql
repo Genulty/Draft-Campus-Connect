@@ -14042,4 +14042,11 @@ INSERT INTO Course_Section (CRN, course_ID, section_No, faculty_ID, time_Slot_ID
   (10939, 'ECON220', '001', 200074, 7, 'NSC-104', 'SP27', 10),
   (10940, 'ECON225', '001', 200075, 9, 'NSC-104', 'SP27', 10);
 
+-- The new senior courses are required for the B.S. in Computer Science (database/migrations/2026-11-10-cs-major-new-requirements.sql)
+INSERT INTO Major_Course_Requirement (major_ID, course_ID, min_Grade_Req) VALUES
+  ('CS-BS', 'CS460', 'D'),
+  ('CS-BS', 'CS470', 'D'),
+  ('CS-BS', 'CS480', 'D'),
+  ('CS-BS', 'MATH360', 'D');
+
 SET FOREIGN_KEY_CHECKS = 1;
