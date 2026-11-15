@@ -169,7 +169,7 @@ function overviewSections(int $studentId, string $semesterId): array
 function viewOverview(array $u, array $q): array
 {
     $studentId = (int) $u['id'];
-    $audit = loadDegreeAudit($studentId);
+    $audit = loadDegreeAudit($studentId, false);
     $page = ['title' => "Welcome, {$u['name']}", 'subtitle' => '', 'blocks' => []];
     if ($audit === null) {
         $page['blocks'][] = ['type' => 'message', 'ok' => false, 'heading' => 'Academic profile unavailable',
@@ -375,8 +375,7 @@ require_once __DIR__ . '/degree-audit.php';
 function viewDegreeAudit(array $u, array $q): array
 {
     $audit = loadDegreeAudit((int) $u['id']);
-    return ['title' => 'Degree audit',
-        'subtitle' => 'Recorded academic progress. Unconfigured graduation rules remain unavailable.',
+    return ['title' => 'Degree Audit',
         'blocks' => $audit === null
             ? [['type' => 'message', 'ok' => false, 'heading' => 'Academic profile unavailable', 'message' => 'No student academic profile is recorded for this account.']]
             : [['type' => 'degree-audit', 'audit' => $audit]]];

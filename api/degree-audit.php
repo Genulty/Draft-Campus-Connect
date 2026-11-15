@@ -2,6 +2,9 @@
 // Read-only Degree Audit data and calculations. No catalog policies are inferred.
 declare(strict_types=1);
 
+require_once __DIR__ . '/degree-audit-supplemental.php';
+require_once __DIR__ . '/degree-audit-electives.php';
+
 // The letter-grade order already used by registration and stored requirement checks.
 // Other grading schemes need an explicit policy and remain unclassified here.
 const AUDIT_GRADES = ['F', 'D', 'D+', 'C-', 'C', 'C+', 'B-', 'B', 'B+', 'A-', 'A'];
@@ -12,7 +15,7 @@ function auditGradeRank(?string $grade): ?int
     return $rank === false ? null : $rank;
 }
 
-function loadDegreeAudit(int $studentId): ?array
+function loadDegreeAudit(int $studentId, bool $includeCreditPolicy = true): ?array
 {
     $profile = one("SELECT s.student_ID AS id, s.student_Type AS type, s.student_Year AS year,
         u.first_Name, u.middle_Name, u.last_Name, CURDATE() AS as_of,
@@ -41,32 +44,185 @@ function loadDegreeAudit(int $studentId): ?array
       WHERE s.student_ID = ? ORDER BY is_primary DESC, m.major_ID", [$studentId]);
     foreach (rows("SELECT 'Minor' AS kind, m.minor_ID AS id, m.minor_Name AS name, 0 AS is_primary, 1 AS declared
         FROM Student_Minor sm JOIN Minor m ON m.minor_ID = sm.minor_ID WHERE sm.student_ID = ? ORDER BY m.minor_ID", [$studentId]) as $minor) $programs[] = $minor;
-    $requirements = rows("SELECT 'Major' AS kind, r.major_ID AS program_id, c.course_ID AS code,
+    // Evaluate the declarations read above even if a major change commits during this request.
+    $programIds = ['Major' => [], 'Minor' => []];
+    foreach ($programs as $program) $programIds[$program['kind']][] = $program['id'];
+    $marks = static fn (array $ids) => $ids ? implode(', ', array_fill(0, count($ids), '?')) : 'NULL';
+    $requirements = rows("SELECT 'Major' AS kind, r.major_ID AS program_id, r.course_ID AS code,
         c.course_Name AS title, c.course_Credits AS credits, r.min_Grade_Req AS minimum_grade
-      FROM Major_Course_Requirement r JOIN Course c ON c.course_ID = r.course_ID
-      WHERE r.major_ID IN (SELECT major_ID FROM Student_Major WHERE student_ID = ? UNION SELECT major_ID FROM Student WHERE student_ID = ?)
+      FROM Major_Course_Requirement r LEFT JOIN Course c ON c.course_ID = r.course_ID
+      WHERE r.major_ID IN ({$marks($programIds['Major'])})
       UNION ALL
-      SELECT 'Minor', r.minor_ID, c.course_ID, c.course_Name, c.course_Credits, r.min_Grade_Req
-      FROM Minor_Course_Requirement r JOIN Course c ON c.course_ID = r.course_ID
-      WHERE r.minor_ID IN (SELECT minor_ID FROM Student_Minor WHERE student_ID = ?)
-      ORDER BY kind, program_id, code", [$studentId, $studentId, $studentId]);
+      SELECT 'Minor', r.minor_ID, r.course_ID, c.course_Name, c.course_Credits, r.min_Grade_Req
+      FROM Minor_Course_Requirement r LEFT JOIN Course c ON c.course_ID = r.course_ID
+      WHERE r.minor_ID IN ({$marks($programIds['Minor'])})
+      ORDER BY kind, program_id, code", [...$programIds['Major'], ...$programIds['Minor']]);
     $history = rows("SELECT h.CRN AS crn, h.course_ID AS code, c.course_Name AS title, c.course_Credits AS credits,
-        h.grade, h.semester_ID AS semester_id, sem.semester_Name AS semester,
-        cs.course_ID AS section_course, cs.semester_ID AS section_semester, e.grade AS enrollment_grade
-      FROM Student_History h JOIN Course c ON c.course_ID = h.course_ID
-      JOIN Semester sem ON sem.semester_ID = h.semester_ID JOIN Course_Section cs ON cs.CRN = h.CRN
+        h.grade, h.semester_ID AS semester_id, COALESCE(sem.semester_Name, h.semester_ID) AS semester, sem.start_Date AS term_start,
+        cs.course_ID AS section_course, cs.semester_ID AS section_semester,
+        e.course_ID AS enrollment_course, e.grade AS enrollment_grade
+      FROM Student_History h LEFT JOIN Course c ON c.course_ID = h.course_ID
+      LEFT JOIN Semester sem ON sem.semester_ID = h.semester_ID LEFT JOIN Course_Section cs ON cs.CRN = h.CRN
       LEFT JOIN Enrollment e ON e.student_ID = h.student_ID AND e.CRN = h.CRN
       WHERE h.student_ID = ? ORDER BY sem.start_Date DESC, h.course_ID, h.CRN", [$studentId]);
-    $enrollments = rows("SELECT cs.CRN AS crn, cs.course_ID AS code, c.course_Name AS title, c.course_Credits AS credits,
+    $enrollments = rows("SELECT e.CRN AS crn, COALESCE(cs.course_ID, e.course_ID) AS code, c.course_Name AS title, c.course_Credits AS credits,
         e.grade, e.course_ID AS enrollment_course, cs.semester_ID AS semester_id,
-        sem.semester_Name AS semester, sem.start_Date, sem.end_Date
-      FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN JOIN Course c ON c.course_ID = cs.course_ID
-      JOIN Semester sem ON sem.semester_ID = cs.semester_ID WHERE e.student_ID = ?
+        COALESCE(sem.semester_Name, cs.semester_ID) AS semester, sem.start_Date, sem.end_Date
+      FROM Enrollment e LEFT JOIN Course_Section cs ON cs.CRN = e.CRN LEFT JOIN Course c ON c.course_ID = cs.course_ID
+      LEFT JOIN Semester sem ON sem.semester_ID = cs.semester_ID WHERE e.student_ID = ?
       ORDER BY sem.start_Date, cs.course_ID, cs.CRN", [$studentId]);
-    return calculateDegreeAudit($profile, $programs, $requirements, $history, $enrollments);
+    $genEd = [];
+    if ($profile['type'] === 'Undergraduate') {
+        try {
+            $genEd = rows('SELECT r.requirement_ID AS id, r.requirement_Name AS name,
+                o.course_ID AS code, c.course_Name AS title, o.min_Grade_Req AS minimum_grade
+              FROM Gen_Ed_Requirement r LEFT JOIN Gen_Ed_Requirement_Course o ON o.requirement_ID = r.requirement_ID
+              LEFT JOIN Course c ON c.course_ID = o.course_ID
+              ORDER BY r.requirement_Name, r.requirement_ID, c.course_ID');
+        } catch (PDOException $error) {
+            // Older databases can still serve the audit before the Gen Ed migration runs.
+            if ($error->getCode() !== '42S02') throw $error;
+        }
+    }
+    $creditPolicy = $includeCreditPolicy && !empty($programs[0]['is_primary'])
+        ? loadDegreeCreditPolicy($programs[0]['id'])
+        : null;
+    $supplemental = $creditPolicy
+        ? loadAuditSupplementalPolicy($creditPolicy['id'], $studentId, $profile['as_of'])
+        : [];
+    $electives = $creditPolicy ? loadAuditElectivePolicy($creditPolicy['id']) : [];
+    return calculateDegreeAudit($profile, $programs, $requirements, $history, $enrollments, $genEd, $creditPolicy, $supplemental, $electives);
 }
 
-function calculateDegreeAudit(array $profile, array $programs, array $requirements, array $history, array $enrollments): array
+function loadDegreeCreditPolicy(string $primaryMajorId): ?array
+{
+    try {
+        $policy = rows('SELECT p.program_ID AS id, p.program_Name AS name, p.total_Credits AS total,
+            p.liberal_Arts_Credits AS liberal_arts, p.is_Draft AS draft, la.course_ID AS eligible_course
+          FROM Degree_Audit_Program_Major m JOIN Degree_Audit_Program p ON p.program_ID = m.program_ID
+          LEFT JOIN Degree_Audit_Liberal_Arts_Course la ON la.program_ID = p.program_ID
+          WHERE m.major_ID = ? ORDER BY la.course_ID', [$primaryMajorId]);
+    } catch (PDOException $error) {
+        if ($error->getCode() !== '42S02') throw $error;
+        return null; // Older installations can render the audit before the migration.
+    }
+    if (!$policy) return null;
+    return $policy[0] + ['eligible_courses' => array_values(array_filter(array_column($policy, 'eligible_course')))];
+}
+
+// Evaluate a catalog course against recognized, reconciled transcript and enrollment evidence.
+function evaluateAuditCourse(array $rule, array $best, array $active, array $future, array $needsReview): array
+{
+    $code = $rule['code'];
+    $minimum = auditGradeRank($rule['minimum_grade']);
+    $passing = $best[$code] ?? null;
+    $review = $needsReview[$code] ?? null;
+    $course = $passing['course'] ?? null;
+    $match = static fn (string $status, string $detail, ?array $evidence = null) => [
+        'status' => $status, 'detail' => $detail, 'course' => $evidence, 'minimum_grade' => $rule['minimum_grade'],
+    ];
+    if ($rule['title'] === null || $minimum === null) {
+        return $match('Rules unavailable', 'The catalog course or minimum grade is missing or unsupported.', $course);
+    }
+    if ($passing && $passing['rank'] > 0 && $passing['rank'] >= $minimum) {
+        return $match('Completed', "Transcript grade {$course['grade']} meets the {$rule['minimum_grade']} minimum.", $course);
+    }
+    if ($review) return $match('Review needed', $review['reason'], $review['course']);
+    if (isset($active[$code])) return $match('In progress', 'Current enrollment. A passing transcript grade is still required.', $active[$code]);
+    if (isset($future[$code])) return $match('Not completed', 'Registered for a future term.', $future[$code]);
+    if ($course) {
+        $detail = $passing['rank'] === 0 ? 'The recorded grade is failing.'
+            : "Transcript grade {$course['grade']} is below the {$rule['minimum_grade']} minimum.";
+        return $match('Not completed', $detail, $course);
+    }
+    return $match('Not completed', 'No qualifying course record is on file.');
+}
+
+// Pick the strongest outcome among alternative catalog courses.
+function auditBestCourseOption(array $options): ?array
+{
+    $priority = ['Not completed' => 1, 'In progress' => 2, 'Rules unavailable' => 3, 'Review needed' => 4, 'Completed' => 5];
+    $best = null;
+    foreach ($options as $option) {
+        if ($best === null || $priority[$option['status']] > $priority[$best['status']]
+            || ($option['status'] === $best['status'] && $best['course'] === null && $option['course'] !== null)) {
+            $best = $option;
+        }
+    }
+    return $best;
+}
+
+function auditRequirementBlockStatus(array $requirements): string
+{
+    if (!$requirements) return 'Rules unavailable';
+
+    $statuses = array_column($requirements, 'status');
+    foreach (['Rules unavailable', 'Review needed', 'In progress', 'Not completed'] as $status) {
+        if (in_array($status, $statuses, true)) return $status;
+    }
+    return 'Completed';
+}
+
+function auditCreditRequirements(
+    ?array $policy, array $programs, array $genEd, bool $undergraduate, array $earned, array $best, array $active
+): array {
+    $totalTarget = isset($policy['total']) ? (int) $policy['total'] : null;
+    $liberalTarget = isset($policy['liberal_arts']) ? (int) $policy['liberal_arts'] : null;
+    $eligible = array_fill_keys($policy['eligible_courses'] ?? [], true);
+    $applied = $liberalTarget !== null && $eligible
+        ? min($liberalTarget, array_sum(array_intersect_key($earned, $eligible)))
+        : null;
+    $courses = [];
+    if ($applied !== null) {
+        foreach (array_intersect_key($earned, $eligible) as $code => $credits) {
+            $courses[] = ['status' => 'Completed'] + $best[$code]['course'];
+        }
+        foreach (array_intersect_key($active, $eligible) as $course) {
+            $courses[] = ['status' => 'In progress'] + $course;
+        }
+    }
+    $liberal = [
+        'credits_required' => $liberalTarget, 'credits_applied' => $applied,
+        'credits_still_needed' => $applied === null ? null : $liberalTarget - $applied,
+        'status' => match (true) {
+            $applied === null => 'Rules unavailable',
+            $applied >= $liberalTarget => 'Completed',
+            (bool) $courses => 'In progress',
+            default => 'Not completed',
+        },
+        'draft' => (bool) ($policy['draft'] ?? false),
+        'courses' => $courses,
+    ];
+
+    $checklist = [];
+    $primaryName = null;
+    foreach ($programs as $program) {
+        if ($program['kind'] === 'Major' && $program['is_primary']) $primaryName = $program['name'];
+        $checklist[] = ['name' => $program['kind'] . ' · ' . $program['name'],
+            'status' => auditRequirementBlockStatus($program['requirements'])];
+    }
+    if ($undergraduate) $checklist[] = ['name' => 'General Education', 'status' => auditRequirementBlockStatus($genEd)];
+    if ($undergraduate || $liberalTarget !== null) $checklist[] = ['name' => 'Liberal Arts', 'status' => $liberal['status']];
+
+    $earnedTotal = array_sum($earned);
+    return [
+        'degree_requirements' => [
+            'program' => $policy['name'] ?? $primaryName,
+            'credits_required' => $totalTarget,
+            'credits_applied' => $earnedTotal,
+            'draft' => (bool) ($policy['draft'] ?? false),
+            'status' => match (true) {
+                $totalTarget === null => 'Rules unavailable',
+                $earnedTotal >= $totalTarget => 'Credit target met',
+                default => 'In progress',
+            },
+            'checklist' => $checklist,
+        ],
+        'liberal_arts' => $liberal,
+    ];
+}
+
+function calculateDegreeAudit(array $profile, array $programs, array $requirements, array $history, array $enrollments, array $genEd = [], ?array $creditPolicy = null, array $supplemental = [], array $electivePolicy = []): array
 {
     $profile['name'] = trim(implode(' ', array_filter([$profile['first_Name'], $profile['middle_Name'], $profile['last_Name']], static fn ($v) => $v !== null && $v !== '')));
     unset($profile['first_Name'], $profile['middle_Name'], $profile['last_Name']);
@@ -75,20 +231,30 @@ function calculateDegreeAudit(array $profile, array $programs, array $requiremen
     $review = [];
     foreach ($history as &$attempt) {
         $code = $attempt['code'];
-        $attempts[$code][] = $attempt;
         $historyByCrn[$attempt['crn']] = $attempt;
         $rank = auditGradeRank($attempt['grade']);
         $consistent = $code === $attempt['section_course'] && $attempt['semester_id'] === $attempt['section_semester']
+            && (($attempt['enrollment_course'] ?? null) === null || $attempt['enrollment_course'] === $code)
             && ($attempt['enrollment_grade'] === null || $attempt['enrollment_grade'] === $attempt['grade']);
-        if (!$consistent || $rank === null) {
-            $attempt['result'] = 'Review needed';
-            $reviewCourses[$code] = true;
+        $reason = match (true) {
+            $attempt['credits'] === null || $attempt['term_start'] === null || $attempt['section_course'] === null
+                => 'The transcript references a missing course, section, or term.',
+            !$consistent => 'Transcript and section/enrollment records disagree.',
+            $attempt['term_start'] > $profile['as_of'] => 'A transcript grade is recorded for a future term.',
+            $rank === null => 'The transcript grade is unsupported.',
+            default => null,
+        };
+        $attempt['result'] = $reason !== null ? 'Review needed' : ($rank > 0 ? 'Passing grade recorded' : 'Not passing');
+        $attempts[$code][] = $attempt;
+        if ($reason !== null) {
+            foreach (array_filter([$code, $attempt['section_course'], $attempt['enrollment_course'] ?? null]) as $affectedCode) {
+                $reviewCourses[$affectedCode] ??= ['reason' => $reason, 'course' => $attempt];
+            }
             $review[] = ['code' => $code, 'crn' => $attempt['crn'], 'semester' => $attempt['semester'],
-                'reason' => !$consistent ? 'Transcript and section/enrollment records disagree; excluded from calculated credits.' : 'Grade policy unavailable; excluded from calculated credits.'];
+                'reason' => $reason . ' Excluded from calculated credits.'];
             continue;
         }
-        $attempt['result'] = $rank > 0 ? 'Passing grade recorded' : 'Not passing';
-        if (!isset($best[$code]) || $rank > $best[$code]['rank']) $best[$code] = ['rank' => $rank, 'grade' => $attempt['grade']];
+        if (!isset($best[$code]) || $rank > $best[$code]['rank']) $best[$code] = ['rank' => $rank, 'course' => $attempt];
         if ($rank > 0) $earned[$code] = (int) $attempt['credits'];
     }
     unset($attempt);
@@ -97,25 +263,29 @@ function calculateDegreeAudit(array $profile, array $programs, array $requiremen
     foreach ($enrollments as $enrollment) {
         if (isset($historyByCrn[$enrollment['crn']])) continue; // Transcript is authoritative for this attempt.
         $code = $enrollment['code'];
-        if ($code !== $enrollment['enrollment_course']) {
-            $enrollment['status'] = 'Course identifiers disagree; review needed';
+        $reason = match (true) {
+            $enrollment['credits'] === null || $enrollment['start_Date'] === null || $enrollment['end_Date'] === null
+                => 'The enrollment references a missing course, section, or term.',
+            $code !== $enrollment['enrollment_course'] => 'Section and enrollment course identifiers disagree.',
+            $enrollment['grade'] !== null => 'Grade posted without transcript history.',
+            $enrollment['end_Date'] < $profile['as_of'] => 'Past enrollment is missing a final transcript grade.',
+            default => null,
+        };
+        if ($reason !== null) {
+            $enrollment['status'] = $reason;
             $pending[] = $enrollment;
-            $reviewCourses[$code] = true;
-        } elseif ($enrollment['grade'] !== null) {
-            $enrollment['status'] = 'Grade posted without transcript history; review needed';
-            $pending[] = $enrollment;
-            $reviewCourses[$code] = true;
+            foreach ([$code, $enrollment['enrollment_course']] as $affectedCode) {
+                $reviewCourses[$affectedCode] ??= ['reason' => $reason, 'course' => $enrollment];
+            }
         } elseif ($enrollment['start_Date'] > $profile['as_of']) {
             $future[] = $enrollment;
-            $futureByCode[$code] = true;
-        } elseif ($enrollment['end_Date'] >= $profile['as_of']) {
-            $inProgress[] = $enrollment;
-            $activeByCode[$code] = true;
+            $futureByCode[$code] ??= $enrollment;
         } else {
-            $enrollment['status'] = 'Past semester; final grade/history missing';
-            $pending[] = $enrollment;
+            $inProgress[] = $enrollment;
+            $activeByCode[$code] ??= $enrollment;
         }
     }
+    $evaluate = static fn (array $rule) => evaluateAuditCourse($rule, $best, $activeByCode, $futureByCode, $reviewCourses);
     $allRequired = $outstanding = [];
     foreach ($programs as &$program) {
         $program['requirements'] = [];
@@ -125,32 +295,41 @@ function calculateDegreeAudit(array $profile, array $programs, array $requiremen
             if ($requirement['kind'] !== $program['kind'] || $requirement['program_id'] !== $program['id']) continue;
             $code = $requirement['code'];
             $allRequired[$code] = true;
-            $minimum = auditGradeRank($requirement['minimum_grade']);
-            $passing = isset($best[$code]) && $best[$code]['rank'] > 0;
-            $met = $minimum !== null && $passing && $best[$code]['rank'] >= $minimum;
-            $requirement['best_grade'] = $best[$code]['grade'] ?? null;
+            $requirement = $evaluate($requirement) + $requirement;
+            $met = $requirement['status'] === 'Completed';
+            $requirement['best_grade'] = $best[$code]['course']['grade'] ?? null;
             $requirement['attempts'] = array_map(static fn ($a) => ['grade' => $a['grade'], 'semester' => $a['semester'], 'crn' => $a['crn']], $attempts[$code] ?? []);
             $requirement['met'] = $met;
-            $requirement['status'] = match (true) {
-                $met => 'Complete',
-                $minimum === null || isset($reviewCourses[$code]) => 'Review needed',
-                isset($activeByCode[$code]) => 'In progress',
-                isset($futureByCode[$code]) => 'Registered for future semester',
-                isset($best[$code]) => 'Below minimum grade',
-                default => 'No completion recorded',
-            };
             $program['requirements'][] = $requirement;
             $program['listed_credits'] += (int) $requirement['credits'];
             if ($met) {
                 $program['met']++;
                 $program['met_credits'] += (int) $requirement['credits'];
             } else $outstanding[] = ['program' => $program['name'], 'kind' => $program['kind'], 'code' => $code,
-                'minimum_grade' => $requirement['minimum_grade'], 'status' => $requirement['status']];
+                'minimum_grade' => $requirement['minimum_grade'], 'status' => $requirement['status'], 'detail' => $requirement['detail']];
         }
         $program['total'] = count($program['requirements']);
         $program['percent'] = $program['total'] ? round(100 * $program['met'] / $program['total'], 1) : null;
     }
     unset($program);
+    $genEdRequirements = [];
+    if ($profile['type'] === 'Undergraduate') {
+        foreach ($genEd as $option) {
+            $id = $option['id'];
+            $genEdRequirements[$id] ??= [
+                'id' => $id, 'name' => $option['name'], 'status' => 'Rules unavailable', 'course' => null,
+                'detail' => 'No course mappings are stored for this requirement.', 'minimum_grade' => null, 'options' => [],
+            ];
+            if ($option['code'] !== null) $genEdRequirements[$id]['options'][] = $option + $evaluate($option);
+        }
+        foreach ($genEdRequirements as &$requirement) {
+            $bestOption = auditBestCourseOption($requirement['options']);
+            if ($bestOption) {
+                foreach (['status', 'detail', 'course', 'minimum_grade'] as $field) $requirement[$field] = $bestOption[$field];
+            }
+        }
+        unset($requirement);
+    }
     $distinctCredits = static function (array $list): int {
         $courses = [];
         foreach ($list as $course) $courses[$course['code']] = (int) $course['credits'];
@@ -161,19 +340,27 @@ function calculateDegreeAudit(array $profile, array $programs, array $requiremen
     $earnedTotal = array_sum($earned);
     if ($stored !== null && (int) $stored !== $earnedTotal) $review[] = ['code' => null, 'crn' => null, 'semester' => null,
         'reason' => 'Stored student credit total differs from the transcript-derived provisional total; reconciliation policy is unavailable.'];
-    return [
-        'profile' => $profile, 'programs' => $programs,
+    $creditRequirements = auditCreditRequirements(
+        $creditPolicy, $programs, $genEdRequirements, $profile['type'] === 'Undergraduate', $earned, $best, $activeByCode
+    );
+    $requiredMatches = array_merge($genEdRequirements, ...array_column($programs, 'requirements'));
+    $claims = auditLiberalArtsClaims(auditCourseClaims($requiredMatches), $creditRequirements['liberal_arts']);
+    $extra = auditSupplementalRequirements($supplemental, $profile['type'] === 'Undergraduate', $evaluate, $claims);
+    $electives = auditElectiveRequirements($electivePolicy, $evaluate, $claims, $extra, $supplemental);
+    foreach (['diversity' => 'Diversity', 'proficiency' => 'Proficiency',
+        'major_electives' => 'Major Electives', 'free_electives' => 'Free Electives'] as $key => $name) {
+        $result = $extra[$key] ?? $electives[$key] ?? null;
+        if ($result !== null) $creditRequirements['degree_requirements']['checklist'][] = [
+            'name' => $name, 'status' => $result['status'],
+        ];
+    }
+    return $creditRequirements + $extra + $electives + [
+        'profile' => $profile, 'programs' => $programs, 'gen_ed' => array_values($genEdRequirements),
         'credits' => ['earned_provisional' => $earnedTotal, 'passing_courses' => count($earned), 'transcript_attempts' => count($history),
             'repeated_courses' => $repeats, 'in_progress' => $distinctCredits($inProgress), 'future_registered' => $distinctCredits($future),
             'degree_target' => null, 'degree_percent' => null],
         'in_progress' => $inProgress, 'future_registered' => $future, 'pending_records' => $pending,
         'history' => $history, 'other_coursework' => array_values(array_filter($history, static fn ($a) => !isset($allRequired[$a['code']]))),
         'outstanding' => $outstanding, 'review' => $review,
-        'unavailable' => [
-            ['title' => 'General Education requirements', 'reason' => 'No program-specific categories or approved course mappings are stored. Applicability and completion are unavailable.'],
-            ['title' => 'Liberal Arts requirements', 'reason' => 'No eligibility classifications or program-specific credit targets are stored. Department prefixes do not establish eligibility.'],
-            ['title' => 'Major Electives', 'reason' => 'No approved elective options, choice groups, or required credit totals are stored.'],
-            ['title' => 'Free Electives', 'reason' => 'No allocation rules, program-specific totals, or cross-requirement credit-sharing policy are stored.'],
-        ],
     ];
 }

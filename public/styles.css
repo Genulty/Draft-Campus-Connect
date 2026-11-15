@@ -124,7 +124,7 @@ tbody tr:hover { background: #f8f9fc; }
 }
 .page-heading[data-view="overview"] #page-title { color: #16294d; font-size: clamp(1.5rem, 2.7vw, 2.15rem); }
 .page-heading[data-view="overview"] #page-subtitle { margin-top: 7px; color: #435675; }
-.page-heading[data-view="overview"] #page-subtitle:empty { display: none; }
+.page-heading:is([data-view="overview"], [data-view="degree-audit"]) #page-subtitle:empty { display: none; }
 #page-blocks > .view-retry { align-self: flex-start; min-height: 44px; }
 .view-loading { color: #4b5a73; }
 
@@ -487,7 +487,7 @@ button.ghost:hover { background: rgba(255,255,255,.08); }
 .audit-profile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 18px 24px; margin: 0; }
 .audit-profile-grid dt { font-size: .78rem; color: #61718b; margin-bottom: 5px; }
 .audit-profile-grid dd { margin: 0; font-weight: 500; overflow-wrap: anywhere; }
-.audit-program { border: 1px solid #dfe5ef; border-radius: 10px; margin-top: 14px; overflow: hidden; min-width: 0; }
+.audit-program { container-type: inline-size; border: 1px solid #dfe5ef; border-radius: 10px; margin-top: 14px; overflow: hidden; min-width: 0; }
 .audit-program-heading { background: #f7f9fd; padding: 16px; display: flex; align-items: center; justify-content: space-between; gap: 14px; cursor: pointer; list-style: none; }
 .audit-program-heading::-webkit-details-marker { display: none; }
 .audit-program-heading > div { display: flex; flex-direction: column; gap: 5px; }
@@ -496,18 +496,72 @@ button.ghost:hover { background: rgba(255,255,255,.08); }
 .audit-program[open] > .audit-program-heading::after { content: '−'; }
 .audit-state { display: inline-block; border-radius: 8px; background: #edf1f7; color: #45536b; padding: 6px 10px; font-size: .8rem; font-weight: 500; line-height: 1.4; }
 .audit-state-met { background: #e5f5eb; color: #176338; }
+.audit-state-progress { background: #e3efff; color: #164b91; }
+.audit-state-unmet { background: #fbe7e7; color: #8c2020; }
 .audit-progress { display: block; width: calc(100% - 32px); height: 10px; margin: 16px; accent-color: #2b5aa6; border: 0; border-radius: 8px; overflow: hidden; }
 .audit-progress::-webkit-progress-bar { background: #e7edf6; border-radius: 8px; }
 .audit-progress::-webkit-progress-value { background: #2b5aa6; border-radius: 8px; }
 .audit-program-note { font-size: .82rem; margin: 0 16px 14px; line-height: 1.5; }
-.audit-program .table-card { border: 0; border-top: 1px solid #dfe5ef; border-radius: 0; }
-.audit-unavailable-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .degree-audit .table-card + .table-card { margin-top: 14px; }
+.degree-audit .table-wrap:focus-visible { outline: 2px solid #2b5aa6; outline-offset: -3px; }
+.audit-rule-table { table-layout: fixed; }
+.audit-rule-table th, .audit-rule-table td { padding: 9px 8px; vertical-align: top; white-space: normal; overflow-wrap: anywhere; }
+.audit-rule-table th:first-child { padding-left: 16px; }
+.audit-rule-table thead th { background: #edf0f5; color: #16294d; font-size: .8rem; letter-spacing: normal; text-transform: none; }
+.audit-rule-table thead th:nth-child(1) { width: 30%; }
+.audit-rule-table thead th:nth-child(2) { width: 15%; }
+.audit-rule-table thead th:nth-child(3) { width: 10%; }
+.audit-rule-table thead th:nth-child(5) { width: 8%; }
+.audit-rule-table thead th:nth-child(6) { width: 9%; }
+.audit-rule-table thead th:nth-child(7) { width: 11%; }
+.audit-rule-table tbody th { background: transparent; color: inherit; font: inherit; letter-spacing: normal; text-transform: none; }
+.audit-rule-table p { margin: 0; line-height: 1.45; }
+.audit-rule-table p + p { margin-top: 3px; }
+.audit-rule-meta { color: #45536b; font-size: .8125rem; }
+.audit-rule-table strong + .audit-rule-meta { margin-top: 3px; }
+.audit-rule-needed { margin-top: 6px; }
+.audit-rule-options { margin: 3px 0 0; padding-left: 18px; }
+.audit-rule-options li + li { margin-top: 4px; }
+.audit-rule-label { display: none; }
+.audit-rule-empty { margin-top: 14px; }
+
+.audit-overall-credit .stat-label { text-transform: none; }
+.audit-credit-heading { flex-wrap: wrap; }
+.audit-credit-values { display: flex; flex-wrap: wrap; gap: 10px 20px; }
+.audit-credit-value { display: grid; gap: 2px; color: #45536b; font-size: .8125rem; }
+.audit-credit-value strong { font-size: 1rem; }
+.audit-credit-note { margin-top: 12px; }
+.audit-credit-checklist { margin: 0; padding: 0; list-style: none; }
+.audit-credit-checklist li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  padding: 8px 16px;
+  border-top: 1px solid #eef1f6;
+  font-size: .875rem;
+}
+.audit-liberal-table thead th:nth-child(1) { width: 17%; }
+.audit-liberal-table thead th:nth-child(2) { width: 12%; }
+.audit-liberal-table thead th:nth-child(3) { width: auto; }
+.audit-liberal-table thead th:nth-child(4) { width: 9%; }
+.audit-liberal-table thead th:nth-child(5) { width: 10%; }
+.audit-liberal-table thead th:nth-child(6) { width: 15%; }
+.audit-proficiency-table thead th:nth-child(3) { width: auto; }
+@container (max-width: 42rem) {
+  .audit-rule-table, .audit-rule-table tbody { display: block; }
+  .audit-rule-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .audit-rule-table tbody tr { display: grid; gap: 7px; padding: 10px 12px; border-top: 1px solid #eef1f6; }
+  .audit-rule-table tbody th:first-child, .audit-rule-table td { padding: 0; border: 0; }
+  .audit-rule-table td { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); align-items: baseline; gap: 8px; }
+  .audit-rule-table td .audit-state { justify-self: start; }
+  .audit-rule-label { display: block; margin-bottom: 2px; color: #4a5570; font-size: .6875rem; font-weight: 600; text-transform: uppercase; }
+}
 .audit-history > summary { cursor: pointer; margin: 0; }
 .audit-history[open] > summary { margin-bottom: 16px; }
 @media (max-width: 640px) {
   .audit-section { padding: 14px; }
-  .audit-unavailable-grid { grid-template-columns: 1fr; }
   .audit-program-heading { flex-wrap: wrap; padding: 12px; }
   .audit-program-heading > div { flex: 1 1 100%; }
   .audit-program-heading .audit-state { flex: 1; }

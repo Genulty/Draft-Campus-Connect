@@ -288,9 +288,121 @@ function renderDegreeAudit(audit) {
   const auditTable = (title, columns, rows, empty) => {
     const block = renderBlock({ type: 'table', title, columns, rows, note: null }, null);
     if (!rows.length) block.querySelector('.empty-row').textContent = empty;
+    else {
+      const wrap = block.querySelector('.table-wrap');
+      wrap.tabIndex = 0;
+      wrap.setAttribute('role', 'region');
+      wrap.setAttribute('aria-label', title);
+      wrap.querySelectorAll('th').forEach(th => { th.scope = 'col'; });
+    }
     return block;
   };
-  const profile = section('Student academic profile');
+  const auditStatus = (text, completed = text === 'Completed' || text === 'Credit target met') => {
+    const badge = el('span', `audit-state${completed ? ' audit-state-met' : ''}`, text);
+    if (text === 'In progress') badge.classList.add('audit-state-progress');
+    if (text === 'Not completed') badge.classList.add('audit-state-unmet');
+    return badge;
+  };
+  const showRequirementDetail = rule => rule.detail && (
+    rule.status === 'Review needed' || rule.status === 'Rules unavailable'
+    || (rule.status === 'Not completed' && (rule.course || rule.sharing_restricted))
+  );
+  const responsiveAuditTable = (title, columns, rows) => {
+    const table = el('table', 'audit-rule-table');
+    table.setAttribute('role', 'table');
+    table.setAttribute('aria-label', title);
+    const head = el('thead');
+    const header = el('tr');
+    head.setAttribute('role', 'rowgroup');
+    header.setAttribute('role', 'row');
+    for (const label of columns) {
+      const cell = el('th', null, label);
+      cell.scope = 'col';
+      cell.setAttribute('role', 'columnheader');
+      header.append(cell);
+    }
+    head.append(header);
+    const body = el('tbody');
+    body.setAttribute('role', 'rowgroup');
+    for (const cells of rows) {
+      const row = el('tr');
+      row.setAttribute('role', 'row');
+      for (const [index, cell] of cells.entries()) {
+        cell.setAttribute('role', cell.tagName === 'TH' ? 'rowheader' : 'cell');
+        const label = el('span', 'audit-rule-label', columns[index]);
+        label.setAttribute('aria-hidden', 'true');
+        cell.prepend(label);
+        row.append(cell);
+      }
+      body.append(row);
+    }
+    table.append(head, body);
+    return table;
+  };
+  const requirementOptions = (requirement, chooseOne = true) => {
+    if (requirement.status === 'Completed' || !requirement.options.length) return null;
+
+    const needed = el('div', 'audit-rule-needed');
+    needed.append(el('strong', null, 'Still needed'));
+    if (chooseOne && requirement.options.length > 1) needed.append(el('span', 'audit-rule-meta', ' · Choose one'));
+    const options = el('ul', 'audit-rule-options');
+    for (const option of requirement.options) {
+      const choice = el('li');
+      const rule = [`Minimum grade ${option.minimum_grade ?? 'unavailable'}`];
+      if (option.status) rule.push(option.status);
+      choice.append(el('span', null, option.title ? `${option.code} · ${option.title}` : option.code),
+        el('span', 'audit-rule-meta', ` · ${rule.join(' · ')}`));
+      if (showRequirementDetail(option) && (option.course?.crn !== requirement.course?.crn || option.detail !== requirement.detail)) {
+        choice.append(el('p', 'audit-rule-meta', option.detail));
+      }
+      options.append(choice);
+    }
+    needed.append(options);
+    return needed;
+  };
+  const requirementTable = (title, requirements, empty) => {
+    if (!requirements.length) return el('p', 'audit-program-note audit-rule-empty', empty);
+
+    const columns = ['Requirement', 'Status', 'Course', 'Title', 'Grade', 'Credits', 'Term'];
+    const rows = requirements.map(requirement => {
+      const name = el('th');
+      name.scope = 'row';
+      name.append(el('strong', null, requirement.name));
+      if (showRequirementDetail(requirement)) name.append(el('p', 'audit-rule-meta', requirement.detail));
+      const status = el('td');
+      status.append(auditStatus(requirement.status));
+
+      const evidence = requirement.course;
+      const course = evidence ?? requirement;
+      const fields = [course.code, course.title, evidence?.grade, course.credits, evidence?.semester];
+
+      const options = requirementOptions(requirement);
+      if (options) name.append(options);
+
+      return [name, status, ...fields.map(value => el('td', null, String(value ?? '—')))];
+    });
+    return responsiveAuditTable(title, columns, rows);
+  };
+  const auditCourseTable = (title, courses) => {
+    const rows = courses.map(course => {
+      const status = el('td');
+      status.append(auditStatus(course.status));
+      return [status, ...[course.code, course.title, course.grade, course.credits, course.semester]
+        .map(value => el('td', null, String(value ?? '—')))];
+    });
+    const table = responsiveAuditTable(title, ['Status', 'Course', 'Title', 'Grade', 'Credits', 'Term'], rows);
+    table.classList.add('audit-liberal-table');
+    return table;
+  };
+  const auditAccordion = (title, status) => {
+    const panel = el('details', 'audit-program');
+    panel.open = true;
+    const summary = el('summary', 'audit-program-heading');
+    summary.append(el('strong', null, title), status);
+    panel.append(summary);
+    return panel;
+  };
+  const profile = section('Student Academic Profile');
   profile.append(el('p', 'audit-student-name', audit.profile.name));
   const fields = el('dl', 'audit-profile-grid');
   const majors = audit.programs.filter(p => p.kind === 'Major');
@@ -305,75 +417,203 @@ function renderDegreeAudit(audit) {
   }
   profile.append(fields); root.append(profile);
 
-  const credit = section('Overall credit progress', 'Program-specific graduation credit targets are not stored. Overall degree completion cannot be calculated.');
+  const credit = section('Overall Credit Progress');
+  credit.classList.add('audit-overall-credit');
   credit.append(renderBlock({ type: 'stats', items: [
-    { label: 'Passing-course credits · provisional', value: audit.credits.earned_provisional },
-    { label: 'In-progress credits · not earned', value: audit.credits.in_progress },
-    { label: 'Future registered credits · not earned', value: audit.credits.future_registered },
-    { label: 'Overall degree completion', value: 'Unavailable' },
+    { label: 'Earned Credits (Provisional)', value: audit.credits.earned_provisional },
+    { label: 'Credits in Progress', value: audit.credits.in_progress },
+    { label: 'Future Registered Credits', value: audit.credits.future_registered },
   ] }, null));
-  credit.append(el('p', 'muted audit-note', `${audit.credits.passing_courses} distinct courses with recognized passing transcript grades. Credits count once per course using current course credits. In-progress totals also count distinct courses and are not added to earned credits; repeats and graduation credit policies need confirmation.`));
-  credit.append(el('p', 'muted audit-note', `Stored student credit total: ${audit.profile.stored_credits ?? 'Unavailable'}. This separate record is not used as a graduation target.`));
   root.append(credit);
 
+  const degree = audit.degree_requirements;
+  if (degree) {
+    const group = section('Degree Requirements');
+    const status = auditStatus(degree.status);
+    const program = degree.program === 'B.S. in Computer Science' ? 'Degree in Bachelor Of Science' : degree.program;
+    const panel = auditAccordion(program ?? 'Primary degree program unavailable', status);
+    panel.querySelector('summary').classList.add('audit-credit-heading');
+    const values = el('span', 'audit-credit-values');
+    for (const [label, value] of [
+      ['Credits Required', degree.credits_required],
+      ['Credits Applied (Provisional)', degree.credits_applied],
+    ]) {
+      const field = el('span', 'audit-credit-value');
+      field.append(el('span', null, label), el('strong', null, value == null ? '—' : String(value)));
+      values.append(field);
+    }
+    status.before(values);
+    if (degree.draft) panel.append(el('p', 'audit-program-note audit-credit-note', 'Draft rule'));
+    if (degree.status === 'Rules unavailable') {
+      const message = degree.program ? 'No credit target is configured for this degree program.'
+        : 'A primary degree program is missing from the student record.';
+      panel.append(el('p', 'audit-program-note audit-credit-note', message));
+    }
+    if (audit.review.length || audit.pending_records.length) {
+      panel.append(el('p', 'audit-program-note audit-credit-note', 'See Records needing review for details.'));
+    }
+    const checklist = el('ul', 'audit-credit-checklist');
+    for (const requirement of degree.checklist) {
+      const item = el('li');
+      item.append(el('span', null, requirement.name), auditStatus(requirement.status));
+      checklist.append(item);
+    }
+    panel.append(checklist);
+    group.append(panel);
+    root.append(group);
+  }
+
   for (const [kind, programs] of [['Major', majors], ['Minor', minors]]) {
-    const group = section(`${kind} requirements`, 'Percentages describe only each stored required-course list. Programs are checked independently; cross-program credit sharing and final degree eligibility are not established.');
-    if (!programs.length) group.append(el('p', 'muted', kind === 'Minor' ? 'No minor declared.' : 'No major recorded. Requirements are unavailable.'));
+    if (kind === 'Minor' && !programs.length) continue;
+    const group = section(kind === 'Major' ? 'Major Requirements' : 'Minor requirements', 'Percentages describe only each stored required-course list. Programs are checked independently; cross-program credit sharing and final degree eligibility are not established.');
+    if (!programs.length) group.append(el('p', 'muted', 'No major recorded. Requirements are unavailable.'));
     for (const program of programs) {
       const card = el('details', 'audit-program'); card.open = true;
       const summary = el('summary', 'audit-program-heading');
       const title = el('div'); title.append(el('strong', null, program.name), el('span', 'muted small', program.id));
-      const state = el('span', `audit-state${program.total && program.met === program.total ? ' audit-state-met' : ''}`,
-        program.percent === null ? 'Requirements unavailable' : `${program.met} of ${program.total} listed courses met · ${program.percent}%`);
+      const state = auditStatus(program.percent === null ? 'Rules unavailable'
+        : `${program.met} of ${program.total} listed courses met · ${program.percent}%`, program.total && program.met === program.total);
       summary.append(title, state); card.append(summary);
       if (program.percent !== null) {
         const meter = el('progress', 'audit-progress'); meter.max = program.total; meter.value = program.met;
         meter.setAttribute('aria-label', `${program.name}: ${program.met} of ${program.total} listed course requirements met`); card.append(meter);
         card.append(el('p', 'muted audit-program-note', `${program.met_credits} of ${program.listed_credits} credits represented by this course list are met in records. This is not the full degree credit requirement.`));
       }
-      card.append(auditTable('Required courses', ['Course', 'Title', 'Credits', 'Minimum grade', 'Best recorded grade', 'Transcript attempts', 'Status'],
-        program.requirements.map(r => [r.code, r.title, r.credits, r.minimum_grade, r.best_grade ?? '—',
-          r.attempts.map(a => a.semester).join('; ') || 'None recorded', r.status]), 'No requirement mappings are stored for this program. Completion is unavailable.'));
+      const requirements = program.requirements.map(r => ({
+        ...r,
+        name: kind === 'Major' ? (r.title ?? r.code) : r.code,
+        options: [{ code: r.code, minimum_grade: r.minimum_grade }],
+      }));
+      card.append(requirementTable(program.name, requirements, 'No requirement mappings are stored for this program. Completion is unavailable.'));
       group.append(card);
     }
     root.append(group);
   }
 
-  const unavailable = el('div', 'audit-unavailable-grid');
-  for (const item of audit.unavailable) {
-    const card = section(item.title); card.append(el('span', 'audit-state', 'Unavailable'), el('p', 'muted audit-note', item.reason)); unavailable.append(card);
+  if (audit.profile.type === 'Undergraduate') {
+    const requirements = audit.gen_ed ?? [];
+    const genEd = section('General Education Requirements',
+      'Harvest Hill draft policy. Each requirement accepts one listed course at its stated minimum grade. Matches are evaluated independently and are excluded from graduation eligibility.');
+    const completed = requirements.filter(r => r.status === 'Completed').length;
+    const status = auditStatus(requirements.length ? `${completed} of ${requirements.length} completed under draft rules` : 'Rules unavailable',
+      requirements.length && completed === requirements.length);
+    const card = auditAccordion('Undergrad Requirements', status);
+    card.append(requirementTable('General Education requirements', requirements,
+      'Shared undergraduate course mappings are unavailable in this database.'));
+    genEd.append(card);
+    root.append(genEd);
   }
-  root.append(unavailable);
+
+  const liberal = audit.liberal_arts;
+  if (liberal) {
+    const group = section('Liberal Arts Requirement');
+    const panel = auditAccordion('Liberal Arts Courses', auditStatus(liberal.status));
+    if (liberal.status === 'Rules unavailable') {
+      panel.append(el('p', 'audit-program-note audit-credit-note', 'A Liberal Arts credit target and eligible courses must be configured for this program.'));
+    } else {
+      const draft = liberal.draft ? 'Harvest Hill draft rule. ' : '';
+      panel.append(el('p', 'audit-program-note audit-credit-note', draft + 'Each earned course counts once toward the Liberal Arts target. A course may also satisfy another requirement. In-progress courses are listed for planning.'));
+      if (liberal.courses.length) {
+        panel.append(auditCourseTable('Qualifying Liberal Arts courses', liberal.courses));
+      } else {
+        panel.append(el('p', 'audit-program-note', 'No qualifying completed or in-progress courses are recorded.'));
+      }
+    }
+    group.append(panel);
+    root.append(group);
+  }
+
+  if (audit.diversity) {
+    const rule = audit.diversity;
+    const group = section('Diversity Requirement');
+    const panel = auditAccordion('Diversity Courses', auditStatus(rule.status));
+    if (rule.draft) panel.append(el('p', 'audit-program-note audit-credit-note', 'Harvest Hill draft rule'));
+    if (rule.configured) panel.append(requirementTable('Diversity courses', [rule]));
+    else panel.append(el('p', 'audit-program-note audit-credit-note', 'No Diversity course options are configured for this program.'));
+    group.append(panel);
+    root.append(group);
+  }
+
+  if (audit.proficiency) {
+    const proficiency = audit.proficiency;
+    const group = section('Proficiency Requirements');
+    const panel = auditAccordion('Proficiency', auditStatus(proficiency.status));
+    if (proficiency.draft) panel.append(el('p', 'audit-program-note audit-credit-note', 'Includes Harvest Hill draft rules.'));
+    if (proficiency.configured) {
+      const rows = proficiency.requirements.map(rule => {
+        const name = el('th', null, rule.name);
+        name.scope = 'row';
+        const status = el('td');
+        status.append(auditStatus(rule.status));
+        const options = requirementOptions(rule);
+        const text = rule.status === 'In progress' ? 'Coursework in progress'
+          : rule.status === 'Not completed' && !options && !rule.detail.startsWith('Still needed') ? `Still needed · ${rule.detail}` : rule.detail;
+        const details = el('td');
+        details.append(el('div', null, text));
+        if (options) details.firstChild.append(options);
+        return [name, status, details];
+      });
+      const table = responsiveAuditTable('Proficiency requirements', ['Requirement', 'Status', 'Details'], rows);
+      table.classList.add('audit-proficiency-table');
+      panel.append(table);
+    } else {
+      panel.append(el('p', 'audit-program-note audit-credit-note', 'No proficiency courses or placement criteria are configured for this program.'));
+    }
+    group.append(panel);
+    root.append(group);
+  }
+
+  for (const [title, electives] of [['Major Electives', audit.major_electives], ['Free Electives', audit.free_electives]]) {
+    if (!electives) continue;
+    const group = section(title);
+    const panel = auditAccordion(`${title === 'Major Electives' ? 'Major' : 'Free'} Elective Courses`, auditStatus(electives.status));
+    if (!electives.configured) {
+      panel.append(el('p', 'audit-program-note audit-credit-note', 'No elective target and course list are configured for this program.'));
+    } else {
+      const unit = electives.unit === 'COURSES' ? 'courses' : 'credits';
+      const draft = electives.draft ? 'Harvest Hill draft rule. ' : '';
+      panel.append(el('p', 'audit-program-note audit-credit-note',
+        `${draft}${electives.applied} of ${electives.target} ${unit} applied · ${electives.in_progress_credits} credits in progress`));
+      if (electives.courses.length) panel.append(auditCourseTable(`${title} coursework`, electives.courses));
+      const options = requirementOptions(electives, electives.unit === 'COURSES' && electives.target - electives.applied === 1);
+      if (options) {
+        options.classList.add('audit-program-note', 'audit-credit-note');
+        panel.append(options);
+      }
+    }
+    group.append(panel);
+    root.append(group);
+  }
 
   const current = section('Courses currently in progress', 'Only ungraded enrollments in semesters that have started and have not ended appear here. These courses do not satisfy completed requirements.');
-  const enrollmentRows = list => list.map(c => [c.code, c.title, c.crn, c.credits, c.semester]);
-  const enrollmentColumns = ['Course', 'Title', 'CRN', 'Credits', 'Semester'];
+  const enrollmentRows = list => list.map(c => [c.code, c.title, c.credits, c.semester]);
+  const enrollmentColumns = ['Course', 'Title', 'Credits', 'Semester'];
   current.append(auditTable('Current courses', enrollmentColumns, enrollmentRows(audit.in_progress), 'No current ungraded enrollments are recorded.'));
   current.append(auditTable('Future registrations', enrollmentColumns, enrollmentRows(audit.future_registered), 'No future registrations are recorded.'));
   root.append(current);
 
-  const outstanding = section('Outstanding graduation requirements', 'Graduation eligibility is unavailable. The list below identifies unmet stored major/minor course requirements only; other graduation rules still require confirmation.');
-  outstanding.append(auditTable('Unmet stored course requirements', ['Program', 'Type', 'Course', 'Minimum grade', 'Status'],
-    audit.outstanding.map(r => [r.program, r.kind, r.code, r.minimum_grade, r.status]),
+  const outstanding = section('Outstanding Graduation Requirements', 'Graduation eligibility is unavailable. The list below identifies unmet stored major/minor course requirements only; other graduation rules still require confirmation.');
+  outstanding.append(auditTable('Unmet stored course requirements', ['Program', 'Type', 'Course', 'Minimum grade', 'Status', 'Details'],
+    audit.outstanding.map(r => [r.program, r.kind, r.code, r.minimum_grade, r.status, r.detail ?? '—']),
     'No unmet entries in the stored course lists. This does not establish graduation eligibility.'));
-  outstanding.append(el('p', 'muted audit-note', 'Still unverified: program credit targets, General Education, Liberal Arts, elective allocation, catalog year, residency, GPA, substitutions, repeat policies and any graduate thesis requirements.'));
+  outstanding.append(el('p', 'muted audit-note', 'Graduation review requires approved Gen Ed, Diversity, Proficiency, credit targets, electives, catalog-year rules, GPA, residency, repeat and transfer policies, substitutions, waivers, and any graduate thesis requirements.'));
   root.append(outstanding);
 
   if (audit.pending_records.length || audit.review.length) {
     const review = section('Records needing review', 'These records are shown for clarification, without changing student data.');
-    review.append(auditTable('Record checks', ['Course / program', 'CRN', 'Semester', 'Reason'], [
-      ...audit.review.map(r => [r.code ?? '—', r.crn ?? '—', r.semester ?? '—', r.reason]),
-      ...audit.pending_records.map(r => [r.code, r.crn, r.semester, r.status]),
+    review.append(auditTable('Record checks', ['Course / program', 'Semester', 'Reason'], [
+      ...audit.review.map(r => [r.code ?? '—', r.semester ?? '—', r.reason]),
+      ...audit.pending_records.map(r => [r.code, r.semester, r.status]),
     ], 'No record checks are pending.')); root.append(review);
   }
   const history = el('details', 'audit-section audit-history');
   history.append(el('summary', 'audit-section-title', `Academic history · ${audit.credits.transcript_attempts} attempts · ${audit.credits.repeated_courses} repeated courses`));
   history.append(el('p', 'muted audit-note', 'All transcript attempts are preserved. A repeated passing course contributes credits once; the highest recognized consistent grade is compared with each stored requirement minimum. Unknown grades need review.'));
-  const historyRows = list => list.map(h => [h.code, h.title, h.crn, h.credits, h.grade, h.semester, h.result]);
-  const historyColumns = ['Course', 'Title', 'CRN', 'Credits', 'Grade', 'Semester', 'Record result'];
+  const historyRows = list => list.map(h => [h.code, h.title, h.credits, h.grade, h.semester, h.result]);
+  const historyColumns = ['Course', 'Title', 'Credits', 'Grade', 'Semester', 'Record result'];
   history.append(auditTable('Transcript coursework', historyColumns, historyRows(audit.history), 'No academic history is recorded. A zero provisional total does not establish that no credits were earned elsewhere.'));
   history.append(auditTable('Other Academic Coursework', historyColumns, historyRows(audit.other_coursework), 'No transcript coursework outside the stored major/minor course lists is recorded.'));
-  history.append(el('p', 'muted audit-note', 'Other Academic Coursework is not automatically assigned to General Education, Liberal Arts, or electives.'));
+  history.append(el('p', 'muted audit-note', 'General Education and Liberal Arts matches appear in their own sections. Elective allocation requires approved rules.'));
   root.append(history);
   return root;
 }
