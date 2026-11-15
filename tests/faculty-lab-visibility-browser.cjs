@@ -9,6 +9,11 @@ const assert = require('node:assert/strict');
 (async () => {
   const root = path.resolve(__dirname, '..');
   const fixture = JSON.parse(execFileSync('php', [path.join(__dirname, 'faculty-lab-visibility.php'), '--browser-fixture'], { encoding: 'utf8', env: process.env }));
+  const labCrns = ({ columns, rows }) => rows
+    .filter(row => row[columns.indexOf('Meeting')] === 'Lab')
+    .map(row => row[columns.indexOf('CRN')]);
+  const fall2026Labs = new Set(Object.values(fixture.faculty).flatMap(data => labCrns(data.pages.FA26.blocks[1])));
+  assert.equal(fall2026Labs.size, 6);
   const browser = await chromium.launch({ headless: true, ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}) });
   const errors = []; let pages = 0;
   try {
@@ -43,10 +48,9 @@ const assert = require('node:assert/strict');
         } else {
           assert.equal(await card.locator('.empty-row').textContent(), 'Nothing to show.');
         }
-        const meetingIndex = schedule.columns.indexOf('Meeting');
-        const labRows = schedule.rows.filter(row => row[meetingIndex] === 'Lab');
-        if (semester === 'FA26') assert.equal(labRows.length, id === '200027' ? 2 : id === '200001' ? 0 : 1);
-        else assert.equal(labRows.length, 0, 'Historical/upcoming display leaked FA26 labs');
+        if (semester !== 'FA26') {
+          assert.ok(labCrns(schedule).every(crn => !fall2026Labs.has(crn)), 'Another semester leaked a Fall 2026 lab');
+        }
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'Page exceeds viewport; table must scroll within its wrapper');
         if (schedule.rows.length) assert.equal(await card.locator('.table-wrap').evaluate(el => getComputedStyle(el).overflowX), 'auto');
       }

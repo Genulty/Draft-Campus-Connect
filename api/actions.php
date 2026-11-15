@@ -204,13 +204,49 @@ function validateSectionSchedule(array $course, int $slotId): void
     }
 }
 
+function adminCanUpdate(int $adminId): bool
+{
+    $admin = one('SELECT security_Level FROM Admin WHERE admin_ID = ?', [$adminId]);
+    return ($admin['security_Level'] ?? null) === 'Read-Write';
+}
+
+function createCourse(int $adminId, array $form): array
+{
+    if (!adminCanUpdate($adminId)) fail('Read-Only admins cannot create courses.');
+
+    $field = static fn (string $key): string => is_string($form[$key] ?? null) ? trim($form[$key]) : '';
+    $id = strtoupper($field('course_ID'));
+    $name = $field('course_Name');
+    $department = $field('dept_ID');
+    $description = $field('course_Desc');
+    $type = $field('course_Type');
+    $credits = $form['course_Credits'] ?? null;
+
+    if (!preg_match('/\A[A-Z0-9]{1,10}\z/', $id)) fail('Enter a course ID of 1 to 10 letters or numbers.');
+    if ($name === '' || preg_match('/\A.{1,100}\z/us', $name) !== 1) fail('Enter a course title of 1 to 100 characters.');
+    if (preg_match('/\A.{0,500}\z/us', $description) !== 1) fail('Use at most 500 characters for the description.');
+    if (!in_array($type, ['Undergraduate', 'Graduate'], true)) fail('Choose a course type.');
+    if ((!is_int($credits) && !is_string($credits)) || !preg_match('/\A[1-6]\z/', (string) $credits)) {
+        fail('Credits must be a whole number from 1 to 6.');
+    }
+    if (!one('SELECT dept_ID FROM Department WHERE dept_ID = ?', [$department])) fail('Choose a department.');
+
+    try {
+        run('INSERT INTO Course (course_ID, course_Name, dept_ID, course_Credits, course_Desc, course_Type) VALUES (?, ?, ?, ?, ?, ?)',
+            [$id, $name, $department, (int) $credits, $description === '' ? null : $description, $type]);
+    } catch (PDOException $error) {
+        if (($error->errorInfo[1] ?? null) === 1062) fail("Course $id already exists.");
+        throw $error;
+    }
+    return ['message' => "Created $id — $name in the course catalog."];
+}
+
 // ---------- Admin: create a course section (A-R26, UC-13) ----------
 function createSection(int $adminId, array $form): array
 {
-    return transaction(function () use ($adminId, $form) {
-        $admin = one('SELECT security_Level FROM Admin WHERE admin_ID = ?', [$adminId]);
-        if (!$admin || $admin['security_Level'] !== 'Read-Write') fail('Read-Only admins cannot create course sections.');
+    if (!adminCanUpdate($adminId)) fail('Read-Only admins cannot create course sections.');
 
+    return transaction(function () use ($form) {
         $capacity = $form['max_Seats'] ?? null;
         // Accept form strings and JSON integers, never coerced floats, booleans, or arrays.
         if ((!is_int($capacity) && !is_string($capacity))
@@ -218,7 +254,8 @@ function createSection(int $adminId, array $form): array
             fail('Section capacity must be a whole number between 5 and 10 students.');
         }
         $seats = (int) $capacity;
-        $sem = one('SELECT semester_ID, semester_Name, start_Date <= CURDATE() AS started FROM Semester WHERE semester_ID = ?',
+        // Serialize section creation for this semester before taking a snapshot of its meetings.
+        $sem = one('SELECT semester_ID, semester_Name, start_Date <= CURDATE() AS started FROM Semester WHERE semester_ID = ? FOR UPDATE',
             [(string) ($form['semester_ID'] ?? '')]);
         if (!$sem) fail('Choose a semester.');
         if ($sem['started']) fail("{$sem['semester_Name']} has already started; sections can only be added to an upcoming semester.");
@@ -232,33 +269,45 @@ function createSection(int $adminId, array $form): array
             || filter_var($slotId, FILTER_VALIDATE_INT) === false) fail('Choose a valid time slot.');
         $slot = one('SELECT time_Slot_ID FROM Time_Slot WHERE time_Slot_ID = ?', [(int) $slotId]);
         if (!$slot) fail('Choose a time slot.');
-        validateSectionSchedule($course, (int) $slot['time_Slot_ID']);
+        $conflicts = [];
+        try {
+            validateSectionSchedule($course, (int) $slot['time_Slot_ID']);
+        } catch (RuleError $error) {
+            $conflicts[] = $error->getMessage();
+        }
         // Capacity comes from whichever subtype table the room matches (Lecture.seats or Lab.work_Stations);
         // an Office cannot hold a class, so only Lecture/Lab rooms are eligible.
         $room = one("SELECT r.room_ID, COALESCE(lab.work_Stations, lec.seats) AS capacity
           FROM Room r LEFT JOIN Lab lab ON lab.lab_ID = r.room_ID LEFT JOIN Lecture lec ON lec.lecture_ID = r.room_ID
           WHERE r.room_ID = ? AND r.room_Type IN ('Lecture', 'Lab')", [(string) ($form['room_ID'] ?? '')]);
         if (!$room) fail('Choose a room.');
-        if ($room['capacity'] < $seats) fail("Room {$room['room_ID']} only holds {$room['capacity']}.");
+        if ($room['capacity'] < $seats) $conflicts[] = "Room {$room['room_ID']} only holds {$room['capacity']}.";
+
 
         $member = one('SELECT 1 AS ok FROM Faculty_Department WHERE faculty_ID = ? AND dept_ID = ?', [$fac['faculty_ID'], $course['dept_ID']]);
-        if (!$member) fail("{$fac['name']} is not a member of the {$course['dept_ID']} department.");
-        // Lock this faculty member's sections for the semester while checking the teaching load.
+        if (!$member) $conflicts[] = "{$fac['name']} is not a member of the {$course['dept_ID']} department.";
+
         $teaching = rows('SELECT CRN FROM Course_Section WHERE faculty_ID = ? AND semester_ID = ? FOR UPDATE',
             [$fac['faculty_ID'], $sem['semester_ID']]);
-        if (count($teaching) >= TEACH_LOAD[$fac['faculty_Type']]) {
-            fail("{$fac['name']} (" . strtolower($fac['faculty_Type']) . ') already teaches ' . count($teaching)
-                . " section(s) in {$sem['semester_Name']}.");
+        $limit = TEACH_LOAD[$fac['faculty_Type']];
+        if (count($teaching) >= $limit) {
+            $conflicts[] = "{$fac['name']} already teaches " . count($teaching)
+                . " section(s) in {$sem['semester_Name']}. Their limit is $limit.";
         }
-        // The teacher and the room must be free at that time, counting lab meetings too (A-F5, A-F6).
-        $facClash = one('SELECT m.CRN, m.course_ID FROM ' . MEETINGS . ' m WHERE m.faculty_ID = ? AND m.semester_ID = ? AND '
-            . overlapsAny('m.time_Slot_ID', 1), [$fac['faculty_ID'], $sem['semester_ID'], $slot['time_Slot_ID']]);
-        if ($facClash) fail("{$fac['name']} already teaches {$facClash['course_ID']} (CRN {$facClash['CRN']}) at that time.");
-        // Lock the room's sections for the semester first, so two admins can't book it at the same time.
+
         rows('SELECT CRN FROM Course_Section WHERE room_ID = ? AND semester_ID = ? FOR UPDATE', [$room['room_ID'], $sem['semester_ID']]);
-        $roomClash = one('SELECT m.CRN, m.course_ID FROM ' . MEETINGS . ' m WHERE m.room_ID = ? AND m.semester_ID = ? AND '
-            . overlapsAny('m.time_Slot_ID', 1), [$room['room_ID'], $sem['semester_ID'], $slot['time_Slot_ID']]);
-        if ($roomClash) fail("Room {$room['room_ID']} is already used by {$roomClash['course_ID']} (CRN {$roomClash['CRN']}) at that time.");
+        // Check every overlapping lecture or lab and show each affected section once.
+        $facultyClashes = rows('SELECT DISTINCT m.CRN, m.course_ID FROM ' . MEETINGS . ' m WHERE m.faculty_ID = ? AND m.semester_ID = ? AND '
+            . overlapsAny('m.time_Slot_ID', 1) . ' ORDER BY m.CRN', [$fac['faculty_ID'], $sem['semester_ID'], $slot['time_Slot_ID']]);
+        foreach ($facultyClashes as $clash) {
+            $conflicts[] = "{$fac['name']} already teaches {$clash['course_ID']} (CRN {$clash['CRN']}) at that time.";
+        }
+        $roomClashes = rows('SELECT DISTINCT m.CRN, m.course_ID FROM ' . MEETINGS . ' m WHERE m.room_ID = ? AND m.semester_ID = ? AND '
+            . overlapsAny('m.time_Slot_ID', 1) . ' ORDER BY m.CRN', [$room['room_ID'], $sem['semester_ID'], $slot['time_Slot_ID']]);
+        foreach ($roomClashes as $clash) {
+            $conflicts[] = "Room {$room['room_ID']} is already used by {$clash['course_ID']} (CRN {$clash['CRN']}) at that time.";
+        }
+        if ($conflicts) fail(implode("\n", $conflicts));
 
         $crn = (int) one('SELECT COALESCE(MAX(CRN), 10000) + 1 AS crn FROM Course_Section FOR UPDATE')['crn'];
         $n = (int) one('SELECT COUNT(*) AS n FROM Course_Section WHERE course_ID = ? AND semester_ID = ?',

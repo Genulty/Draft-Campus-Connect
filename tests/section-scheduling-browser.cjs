@@ -51,7 +51,7 @@ const assert = require('node:assert/strict');
     for(const [course,slot] of [['TEST101','1'],['TEST101','2'],['TEST101','3'],['TEST104','3'],['TEST104','2'],['TEST600','4'],['TEST600','1'],['TEST600','3']]) {
       await form.locator('[name=course_ID]').selectOption(course);
       await form.locator('[name=time_Slot_ID]').selectOption(slot);
-      await form.locator('[name=faculty_ID]').selectOption(''); // No fabricated faculty data needed by renderer test.
+      await form.locator('[name=faculty_ID]').selectOption('1');
       await form.locator('[name=max_Seats]').fill('5');
       await form.locator('button[type=submit]').click();
       const result=fixture.cases[course+'/'+slot];

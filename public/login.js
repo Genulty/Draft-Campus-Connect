@@ -620,7 +620,14 @@ function renderDegreeAudit(audit) {
 
 function renderFlash({ ok, message, heading }) {
   const box = el('div', ok ? 'flash ok' : 'flash err');
-  box.append(el('strong', null, heading || (ok ? 'Done' : 'Not allowed')), el('span', null, message));
+  box.append(el('strong', null, heading || (ok ? 'Done' : 'Not allowed')));
+  if (typeof message === 'string' && message.includes('\n')) {
+    const list = el('ul');
+    for (const item of message.split('\n')) list.append(el('li', null, item));
+    box.append(list);
+  } else {
+    box.append(el('span', null, message));
+  }
   return box;
 }
 
@@ -724,18 +731,22 @@ if (block.type === 'empty-major') {
           input.append(o);
         }
         // Some choices reload the form, e.g. the semester (teaching loads depend on it) or the type of user.
-        if (f.reload) input.addEventListener('change', () => openView(viewId, { [f.reload]: input.value }));
+        if (f.reload) input.addEventListener('change', () => {
+          const values = f.keepOnReload ? Object.fromEntries(new FormData(card)) : {};
+          openView(viewId, { ...values, [f.reload]: input.value });
+        });
       } else {
         input = el('input');
         input.type = f.type || 'text';
         if (f.min !== undefined) input.min = f.min;
         if (f.max !== undefined) input.max = f.max;
         if (f.step !== undefined) input.step = f.step;
-        if (f.required) input.required = true;
+        if (f.maxLength !== undefined) input.maxLength = f.maxLength;
         input.value = f.value;
         if (f.placeholder) input.placeholder = f.placeholder;
         if (f.type === 'password') input.autocomplete = 'new-password';
       }
+      if (f.required) input.required = true;
       input.name = f.name;
       label.append(input);
       grid.append(label);

@@ -115,7 +115,7 @@ switch (true) {
             'add-minor' => ['Student'], 'change-minor' => ['Student'], 'drop-minor' => ['Student'],
             'update-address' => $everyone, 'request-password-change' => $everyone,
             'verify-password-code' => $everyone, 'complete-password-change' => $everyone,
-            'create-section' => ['Admin'], 'create-user' => ['Admin'], 'send-password-reset' => ['Admin'],
+            'create-course' => ['Admin'], 'create-section' => ['Admin'], 'create-user' => ['Admin'], 'send-password-reset' => ['Admin'],
             'record-attendance' => ['Faculty'], 'record-grade' => ['Faculty'],
         ];
         if (!in_array($user['role'], $allowed[$m[1]] ?? [], true)) respond(403, ['error' => 'Your role cannot do that.']);
@@ -132,6 +132,7 @@ switch (true) {
             'request-password-change' => requestPasswordChange($user['id'], $body),
             'verify-password-code' => verifyPasswordChangeCode($user['id'], $body),
             'complete-password-change' => finishReset($body, $user['id']),
+            'create-course' => createCourse($user['id'], $body),
             'create-section' => createSection($user['id'], $body),
             'create-user' => createUser($user['id'], $body),
             'send-password-reset' => adminSendReset($user['id'], $body),

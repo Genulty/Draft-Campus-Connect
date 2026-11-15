@@ -95,9 +95,9 @@ foreach(['readonly','small-room','department','load','faculty-conflict','room-co
 }
 $scenario='';
 $courseOptions=[
-    ['course_ID'=>'TEST101','course_Name'=>'Fixture undergraduate','course_Type'=>'Undergraduate','course_Credits'=>3],
-    ['course_ID'=>'TEST104','course_Name'=>'Fixture four-credit','course_Type'=>'Undergraduate','course_Credits'=>4],
-    ['course_ID'=>'TEST600','course_Name'=>'Fixture graduate','course_Type'=>'Graduate','course_Credits'=>3],
+    ['course_ID'=>'TEST101','course_Name'=>'Fixture undergraduate','course_Type'=>'Undergraduate','course_Credits'=>3,'dept_ID'=>'TEST'],
+    ['course_ID'=>'TEST104','course_Name'=>'Fixture four-credit','course_Type'=>'Undergraduate','course_Credits'=>4,'dept_ID'=>'TEST'],
+    ['course_ID'=>'TEST600','course_Name'=>'Fixture graduate','course_Type'=>'Graduate','course_Credits'=>3,'dept_ID'=>'TEST'],
 ];
 $slotOptions=[['id'=>'1','label'=>'MW 8:00 AM – 9:20 AM'],['id'=>'2','label'=>'F 8:00 AM – 9:20 AM'],['id'=>'3','label'=>'MW 8:00 AM – 9:40 AM'],['id'=>'4','label'=>'F 9:00 AM – 12:00 PM']];
 $form=viewCreateSection(['id'=>1,'role'=>'Admin'],['course_ID'=>'TEST101'])['blocks'][0];

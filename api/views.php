@@ -39,10 +39,12 @@ const COURSE_LEVEL = "CASE
   ELSE 'Unclassified' END";
 
 // Columns shared by course-section lists, including the credits used by the major browser.
-const SECTION_COLUMNS = "cs.CRN, cs.course_ID AS Course, c.course_Name AS Title, cs.section_No AS Section,
+const SCHEDULE_DETAILS = "c.course_Name AS Title, cs.section_No AS Section,
   c.course_Credits AS Credits, " . COURSE_LEVEL . " AS Level,
   (SELECT GROUP_CONCAT(d.day_ID ORDER BY FIELD(d.day_ID,'M','T','W','R','F') SEPARATOR '')
      FROM Time_Slot_Day d WHERE d.time_Slot_ID = cs.time_Slot_ID) AS Days";
+const SECTION_COLUMNS = "cs.CRN, cs.course_ID AS Course, " . SCHEDULE_DETAILS;
+const SCHEDULE_COLUMNS = "cs.CRN, " . SCHEDULE_DETAILS;
 const TIME_ROOM = "CONCAT(TIME_FORMAT(p.start_Time, '%l:%i %p'), ' – ', TIME_FORMAT(p.end_Time, '%l:%i %p')) AS Time,
   CONCAT(b.building_Name, ' ', r.room_No) AS Room";
 const SECTION_JOINS = 'JOIN Course c ON c.course_ID = cs.course_ID
@@ -72,9 +74,10 @@ const GPA_POINTS = "CASE h.grade WHEN 'A' THEN 4 WHEN 'A-' THEN 3.7 WHEN 'B+' TH
 
 // One student's sections in one semester. Includes each section's lab meeting
 // (Course_Section_Lab), when it has one, alongside its lecture.
-function studentSchedule(string $title, int $studentId, string $semesterId, ?string $note = null): array
+function studentSchedule(string $title, int $studentId, string $semesterId, ?string $note = null, bool $showCourseId = true): array
 {
-    return table($title, 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ', ' . LAB_COLUMNS . ' FROM Enrollment e
+    $columns = $showCourseId ? SECTION_COLUMNS : SCHEDULE_COLUMNS;
+    return table($title, 'SELECT ' . $columns . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ', ' . LAB_COLUMNS . ' FROM Enrollment e
       JOIN Course_Section cs ON cs.CRN = e.CRN ' . SECTION_JOINS . ' ' . LAB_JOINS . '
       WHERE e.student_ID = ? AND cs.semester_ID = ? ' . ORDER_BY_TIME, [$studentId, $semesterId], $note);
 }
@@ -233,8 +236,8 @@ function viewSchedule(array $u, array $q): array
 {
     $cur = currentSemester();
     $next = nextSemester();
-    $blocks = [studentSchedule("{$cur['name']} (current semester)", $u['id'], $cur['id'])];
-    if ($next) $blocks[] = studentSchedule("{$next['name']} (next semester)", $u['id'], $next['id'], 'Add or drop sections on the Register page.');
+    $blocks = [studentSchedule("{$cur['name']} (current semester)", $u['id'], $cur['id'], showCourseId: false)];
+    if ($next) $blocks[] = studentSchedule("{$next['name']} (next semester)", $u['id'], $next['id'], 'Add or drop sections on the Register page.', showCourseId: false);
     return ['title' => 'My schedule', 'blocks' => $blocks];
 }
 
@@ -571,17 +574,47 @@ function viewAudit(array $u, array $q): array
 }
 
 // Create a course section (A-R26) for an upcoming semester.
+function viewCreateCourse(array $u, array $q): array
+{
+    $page = ['title' => 'Create a course', 'blocks' => []];
+    if (!adminCanUpdate((int) $u['id'])) {
+        return $page + ['subtitle' => 'Course creation requires Read-Write access.'];
+    }
+    $page['blocks'][] = ['type' => 'form', 'title' => 'New catalog course',
+        'endpoint' => 'create-course', 'submit' => 'Create course', 'fields' => [
+            ['name' => 'course_ID', 'label' => 'Course ID', 'value' => '', 'required' => true, 'maxLength' => 10],
+            ['name' => 'course_Name', 'label' => 'Course title', 'value' => '', 'required' => true, 'maxLength' => 100],
+            ['name' => 'dept_ID', 'label' => 'Department', 'value' => '', 'required' => true,
+                'options' => array_merge([['', 'Choose a department']], array_map(fn ($d) => [$d['dept_ID'], $d['dept_Name']], departments()))],
+            ['name' => 'course_Credits', 'label' => 'Credits', 'value' => '', 'type' => 'number', 'min' => 1, 'max' => 6, 'step' => 1, 'required' => true],
+            ['name' => 'course_Type', 'label' => 'Course type', 'value' => '', 'required' => true,
+                'options' => [['', 'Choose a course type'], ['Undergraduate', 'Undergraduate'], ['Graduate', 'Graduate']]],
+            ['name' => 'course_Desc', 'label' => 'Description (optional)', 'value' => '', 'maxLength' => 500],
+        ]];
+    return $page;
+}
+
 function viewCreateSection(array $u, array $q): array
 {
     $sems = rows('SELECT semester_ID, semester_Name FROM Semester WHERE start_Date > CURDATE() ORDER BY start_Date');
     if (!$sems) return ['title' => 'Create a course section', 'subtitle' => 'There is no upcoming semester.', 'blocks' => []];
     $sem = $sems[0];
     foreach ($sems as $s) if ($s['semester_ID'] === ($q['semester'] ?? null)) $sem = $s;
-    $courses = rows('SELECT course_ID, course_Name, course_Type, course_Credits FROM Course ORDER BY course_ID');
-    $fac = rows("SELECT f.faculty_ID, CONCAT(u.first_Name, ' ', u.last_Name) AS name, f.faculty_Type,
-        (SELECT GROUP_CONCAT(fd.dept_ID SEPARATOR '/') FROM Faculty_Department fd WHERE fd.faculty_ID = f.faculty_ID) AS depts,
+    $newest = table("Newest {$sem['semester_Name']} sections", 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ' FROM Course_Section cs ' . SECTION_JOINS . '
+      WHERE cs.semester_ID = ? ORDER BY cs.CRN DESC LIMIT 5', [$sem['semester_ID']]);
+    if (!adminCanUpdate((int) $u['id'])) {
+        return ['title' => 'Create a course section', 'subtitle' => 'Section creation requires Read-Write access.', 'blocks' => [$newest]];
+    }
+    $courses = rows('SELECT course_ID, course_Name, course_Type, course_Credits, dept_ID FROM Course ORDER BY course_ID');
+    $courseId = is_string($q['course_ID'] ?? null) ? $q['course_ID'] : '';
+    $department = array_column($courses, 'dept_ID', 'course_ID')[$courseId] ?? null;
+    $fac = $department === null ? [] : rows("SELECT f.faculty_ID, CONCAT(u.first_Name, ' ', u.last_Name) AS name, f.faculty_Type,
         (SELECT COUNT(*) FROM Course_Section cs WHERE cs.faculty_ID = f.faculty_ID AND cs.semester_ID = ?) AS teaching
-      FROM Faculty f JOIN User u ON u.user_ID = f.faculty_ID ORDER BY depts, u.last_Name", [$sem['semester_ID']]);
+      FROM Faculty f JOIN User u ON u.user_ID = f.faculty_ID
+      JOIN Faculty_Department fd ON fd.faculty_ID = f.faculty_ID
+      WHERE fd.dept_ID = ? ORDER BY u.last_Name, u.first_Name, f.faculty_ID", [$sem['semester_ID'], $department]);
+    $facultyIds = array_map('strval', array_column($fac, 'faculty_ID'));
+    $facultyId = in_array($q['faculty_ID'] ?? null, $facultyIds, true) ? $q['faculty_ID'] : '';
     $slots = rows("SELECT ts.time_Slot_ID AS id,
         CONCAT((SELECT GROUP_CONCAT(d.day_ID ORDER BY FIELD(d.day_ID,'M','T','W','R','F') SEPARATOR '') FROM Time_Slot_Day d WHERE d.time_Slot_ID = ts.time_Slot_ID),
           ' ', TIME_FORMAT(p.start_Time, '%l:%i %p'), ' – ', TIME_FORMAT(p.end_Time, '%l:%i %p')) AS label
@@ -601,21 +634,21 @@ function viewCreateSection(array $u, array $q): array
     return ['title' => 'Create a course section', 'blocks' => [
         ['type' => 'form', 'title' => "New section for {$sem['semester_Name']}", 'endpoint' => 'create-section', 'submit' => 'Create section', 'keep' => true,
             'note' => 'Capacity: a whole number from 5 to 10 students. Undergraduate courses need at least two distinct meeting days; three-credit undergraduate courses need exactly two 80-minute meetings (160 minutes weekly). Four-credit undergraduate lecture/lab details remain unresolved; no duration or lab requirement is imposed here. Three-credit graduate courses may meet once for 180 minutes; graduate courses are not restricted to once-weekly schedules.', 'fields' => [
-            ['name' => 'semester_ID', 'label' => 'Semester', 'value' => $sem['semester_ID'], 'reload' => 'semester',
+            ['name' => 'semester_ID', 'label' => 'Semester', 'value' => $sem['semester_ID'], 'reload' => 'semester', 'keepOnReload' => true,
                 'options' => array_map(fn ($x) => [$x['semester_ID'], $x['semester_Name']], $sems)],
-            ['name' => 'course_ID', 'label' => 'Course', 'value' => $v('course_ID', 'CS455'),
-                'options' => array_map(fn ($c) => [$c['course_ID'], "{$c['course_ID']} {$c['course_Name']} ({$c['course_Type']}, {$c['course_Credits']} credits)"], $courses)],
-            ['name' => 'faculty_ID', 'label' => 'Faculty', 'value' => $v('faculty_ID', ''),
-                'options' => array_merge([['', 'Choose…']], array_map(fn ($f) => [(string) $f['faculty_ID'],
-                    "{$f['name']} ({$f['depts']}, {$f['faculty_Type']}, teaching {$f['teaching']} of " . ($f['faculty_Type'] === 'Full-time' ? 2 : 1) . ')'], $fac))],
+            ['name' => 'course_ID', 'label' => 'Course', 'value' => $department === null ? '' : $courseId,
+                'reload' => 'course_ID', 'keepOnReload' => true, 'required' => true,
+                'options' => array_merge([['', 'Choose a course']], array_map(fn ($c) => [$c['course_ID'], "{$c['course_ID']} {$c['course_Name']} ({$c['course_Type']}, {$c['course_Credits']} credits)"], $courses))],
+            ['name' => 'faculty_ID', 'label' => 'Faculty', 'value' => $facultyId, 'required' => true,
+                'options' => array_merge([['', $department === null ? 'Choose a course first' : ($fac ? 'Choose faculty' : 'No faculty in this department')]], array_map(fn ($f) => [(string) $f['faculty_ID'],
+                    "{$f['name']} ({$f['faculty_Type']}, teaching {$f['teaching']} of " . TEACH_LOAD[$f['faculty_Type']] . ')'], $fac))],
             ['name' => 'time_Slot_ID', 'label' => 'Time slot', 'value' => $v('time_Slot_ID', '1'),
                 'options' => array_map(fn ($t) => [(string) $t['id'], $t['label']], $slots)],
-            ['name' => 'room_ID', 'label' => 'Room', 'value' => $v('room_ID', $rooms[0]['room_ID']),
+            ['name' => 'room_ID', 'label' => 'Room', 'value' => $v('room_ID', $rooms[0]['room_ID'] ?? ''),
                 'options' => array_map(fn ($r) => [$r['room_ID'], "{$r['building_Name']} {$r['room_No']} ({$r['room_Type']}, {$r['capacity']} seats)"], $rooms)],
             ['name' => 'max_Seats', 'label' => 'Max seats (5–10)', 'type' => 'number', 'min' => 5, 'max' => 10, 'step' => 1, 'required' => true, 'value' => $v('max_Seats', '10')],
         ]],
-        table("Newest {$sem['semester_Name']} sections", 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ' FROM Course_Section cs ' . SECTION_JOINS . '
-          WHERE cs.semester_ID = ? ORDER BY cs.CRN DESC LIMIT 5', [$sem['semester_ID']]),
+        $newest,
     ]];
 }
 
@@ -812,7 +845,7 @@ function masterSchedule(array $q): array
 {
     [$semester, $deptId, $filters] = semesterFilter($q);
     return [$filters,
-        table('Course sections', 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ', ' . LAB_COLUMNS . ', ' . SEATS . '
+        table('Course sections', 'SELECT ' . SCHEDULE_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ', ' . LAB_COLUMNS . ', ' . SEATS . '
           FROM Course_Section cs ' . SECTION_JOINS . ' ' . LAB_JOINS . "
           WHERE cs.semester_ID = ? AND (? = '' OR c.dept_ID = ?) ORDER BY cs.course_ID, cs.section_No", [$semester, $deptId, $deptId])];
 }
@@ -1132,6 +1165,7 @@ const VIEWS = [
     'admin-overview' => ['Overview', ['Admin'], 'viewAdminOverview'],
     'create-user' => ['Create user', ['Admin'], 'viewCreateUser'],
     'reset-password' => ['Reset a password', ['Admin'], 'viewResetPassword'],
+    'create-course' => ['Create course', ['Admin'], 'viewCreateCourse'],
     'create-section' => ['Create section', ['Admin'], 'viewCreateSection'],
     'holds' => ['Student holds', ['Admin'], 'viewHolds'],
     'audit' => ['Audit log', ['Admin'], 'viewAudit'],
