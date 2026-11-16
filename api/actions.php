@@ -327,6 +327,254 @@ function createSection(int $adminId, array $form): array
     });
 }
 
+// Every admin write that isn't about one specific user (a department or course edit, say) is
+// still logged to Audit_Log/"the update log" by attributing it to the admin's own account --
+// Audit_Log.user_ID is NOT NULL and an admin's ID is itself a real User row, so this stays within
+// the existing schema rather than adding a second logging table.
+function logUpdate(int $adminId, string $actionType, ?string $field, ?string $old, ?string $new, ?int $userId = null): void
+{
+    // Department/Course changes affect no single user, so they self-attribute to the editing
+    // admin's own user_ID; a change that DOES affect a specific user (e.g. a hold) passes $userId.
+    run('INSERT INTO Audit_Log (admin_ID, user_ID, action_Type, field_Name, old_Value, new_Value, date_Time)
+      VALUES (?, ?, ?, ?, ?, ?, NOW())', [$adminId, $userId ?? $adminId, $actionType, $field, $old, $new]);
+}
+
+// ---------- Admin: add or update a Department record ----------
+// Read-Only admins are blocked by the generic adminCanUpdate() gate in index.php, so this
+// function does not repeat that check itself.
+function upsertDepartment(int $adminId, array $form): array
+{
+    return transaction(function () use ($adminId, $form) {
+        $deptId = strtoupper(trim((string) ($form['dept_ID'] ?? '')));
+        if (!preg_match('/\A[A-Z]{2,10}\z/', $deptId)) fail('Department ID must be 2-10 letters, e.g. CS.');
+        $name = trim((string) ($form['dept_Name'] ?? ''));
+        if ($name === '') fail('Enter a department name.');
+        $email = trim((string) ($form['email'] ?? ''));
+        $phone = trim((string) ($form['phone_No'] ?? ''));
+        $chairInput = (string) ($form['chair_ID'] ?? '');
+        $chair = $chairInput !== '' ? one('SELECT faculty_ID FROM Faculty WHERE faculty_ID = ?', [filter_var($chairInput, FILTER_VALIDATE_INT) ?: 0]) : null;
+        if ($chairInput !== '' && !$chair) fail('Choose a valid chair.');
+        $officeInput = trim((string) ($form['office_ID'] ?? ''));
+        $office = $officeInput !== '' ? one("SELECT room_ID FROM Room WHERE room_ID = ? AND room_Type = 'Office'", [$officeInput]) : null;
+        if ($officeInput !== '' && !$office) fail('Choose a valid office.');
+
+        $existing = one('SELECT dept_Name, chair_ID, email, phone_No, office_ID FROM Department WHERE dept_ID = ? FOR UPDATE', [$deptId]);
+        $new = ['dept_Name' => $name, 'chair_ID' => $chair['faculty_ID'] ?? '', 'email' => $email, 'phone_No' => $phone, 'office_ID' => $office['room_ID'] ?? ''];
+        if ($existing) {
+            foreach ($new as $field => $newVal) {
+                $oldVal = (string) ($existing[$field] ?? '');
+                if ($oldVal !== (string) $newVal) logUpdate($adminId, 'Update', "Department.$field", $oldVal, (string) $newVal);
+            }
+            run('UPDATE Department SET dept_Name = ?, chair_ID = ?, email = ?, phone_No = ?, office_ID = ? WHERE dept_ID = ?',
+                [$name, $chair['faculty_ID'] ?? null, $email !== '' ? $email : null, $phone !== '' ? $phone : null, $office['room_ID'] ?? null, $deptId]);
+            return ['message' => "Updated the $deptId department."];
+        }
+        run('INSERT INTO Department (dept_ID, dept_Name, chair_ID, email, phone_No, office_ID) VALUES (?, ?, ?, ?, ?, ?)',
+            [$deptId, $name, $chair['faculty_ID'] ?? null, $email !== '' ? $email : null, $phone !== '' ? $phone : null, $office['room_ID'] ?? null]);
+        logUpdate($adminId, 'Create', 'Department', null, $deptId);
+        return ['message' => "Created the $deptId department."];
+    });
+}
+
+// ---------- Admin: reassign faculty on an existing course section (UC10/11) ----------
+function reassignFaculty(int $adminId, array $form): array
+{
+    $crn = registrationCrn($form['CRN'] ?? null);
+    return transaction(function () use ($adminId, $crn, $form) {
+        $sec = one('SELECT cs.CRN, cs.course_ID, cs.time_Slot_ID, cs.semester_ID, c.dept_ID, s.semester_Name, s.start_Date <= CURDATE() AS started
+          FROM Course_Section cs JOIN Course c ON c.course_ID = cs.course_ID JOIN Semester s ON s.semester_ID = cs.semester_ID
+          WHERE cs.CRN = ? FOR UPDATE', [$crn]);
+        if (!$sec) fail('That course section does not exist.');
+        if ($sec['started']) fail("{$sec['semester_Name']} has already started; the faculty assignment is unchanged.");
+
+        $fac = one("SELECT f.faculty_ID, f.faculty_Type, CONCAT(u.first_Name, ' ', u.last_Name) AS name
+          FROM Faculty f JOIN User u ON u.user_ID = f.faculty_ID WHERE f.faculty_ID = ?", [filter_var($form['faculty_ID'] ?? null, FILTER_VALIDATE_INT) ?: 0]);
+        if (!$fac) fail('Choose a faculty member.');
+
+        $conflicts = [];
+        $member = one('SELECT 1 AS ok FROM Faculty_Department WHERE faculty_ID = ? AND dept_ID = ?', [$fac['faculty_ID'], $sec['dept_ID']]);
+        if (!$member) $conflicts[] = "{$fac['name']} is not a member of the {$sec['dept_ID']} department.";
+        // This section itself is excluded from both the load count and the clash checks below,
+        // since it is the one being reassigned, not a second section creating a real conflict.
+        $teaching = rows('SELECT CRN FROM Course_Section WHERE faculty_ID = ? AND semester_ID = ? AND CRN <> ? FOR UPDATE',
+            [$fac['faculty_ID'], $sec['semester_ID'], $crn]);
+        if (count($teaching) >= TEACH_LOAD[$fac['faculty_Type']]) {
+            $conflicts[] = "{$fac['name']} (" . strtolower($fac['faculty_Type']) . ') already teaches ' . count($teaching)
+                . " other section(s) in {$sec['semester_Name']}.";
+        }
+        $facClash = one('SELECT m.CRN, m.course_ID FROM ' . MEETINGS . ' m WHERE m.faculty_ID = ? AND m.semester_ID = ? AND m.CRN <> ? AND '
+            . overlapsAny('m.time_Slot_ID', 1), [$fac['faculty_ID'], $sec['semester_ID'], $crn, $sec['time_Slot_ID']]);
+        if ($facClash) $conflicts[] = "{$fac['name']} already teaches {$facClash['course_ID']} (CRN {$facClash['CRN']}) at that time.";
+        if ($conflicts) fail(implode(' ', $conflicts));
+
+        run('UPDATE Course_Section SET faculty_ID = ? WHERE CRN = ?', [$fac['faculty_ID'], $crn]);
+        return ['message' => "{$sec['course_ID']} (CRN $crn) is now taught by {$fac['name']}."];
+    });
+}
+
+// ---------- Admin: attempt to change an existing section's time slot (UC12) ----------
+// The spec only documents the failure path (semester already started); a before-start success
+// path is built symmetrically to Reassign Faculty above, since nothing suggests time-slot changes
+// are meant to be permanently disabled, only that the manual never wrote up that success case.
+function updateSectionTimeSlot(int $adminId, array $form): array
+{
+    $crn = registrationCrn($form['CRN'] ?? null);
+    return transaction(function () use ($adminId, $crn, $form) {
+        $sec = one('SELECT cs.CRN, cs.course_ID, cs.faculty_ID, cs.room_ID, cs.semester_ID, c.course_Type, c.course_Credits,
+            s.semester_Name, s.start_Date <= CURDATE() AS started
+          FROM Course_Section cs JOIN Course c ON c.course_ID = cs.course_ID JOIN Semester s ON s.semester_ID = cs.semester_ID
+          WHERE cs.CRN = ? FOR UPDATE', [$crn]);
+        if (!$sec) fail('That course section does not exist.');
+        if ($sec['started']) fail("{$sec['semester_Name']} has already started; the time slot is unchanged.");
+
+        $slotId = $form['time_Slot_ID'] ?? null;
+        if ((!is_int($slotId) && !is_string($slotId)) || !preg_match('/\A[1-9][0-9]*\z/', (string) $slotId)
+            || filter_var($slotId, FILTER_VALIDATE_INT) === false) fail('Choose a valid time slot.');
+        $slot = one('SELECT time_Slot_ID FROM Time_Slot WHERE time_Slot_ID = ?', [(int) $slotId]);
+        if (!$slot) fail('Choose a time slot.');
+        validateSectionSchedule(['course_ID' => $sec['course_ID'], 'course_Type' => $sec['course_Type'], 'course_Credits' => $sec['course_Credits']], (int) $slot['time_Slot_ID']);
+
+        $conflicts = [];
+        $facClash = one('SELECT m.CRN, m.course_ID FROM ' . MEETINGS . ' m WHERE m.faculty_ID = ? AND m.semester_ID = ? AND m.CRN <> ? AND '
+            . overlapsAny('m.time_Slot_ID', 1), [$sec['faculty_ID'], $sec['semester_ID'], $crn, $slot['time_Slot_ID']]);
+        if ($facClash) $conflicts[] = "The assigned faculty already teaches {$facClash['course_ID']} (CRN {$facClash['CRN']}) at that time.";
+        $roomClash = one('SELECT m.CRN, m.course_ID FROM ' . MEETINGS . ' m WHERE m.room_ID = ? AND m.semester_ID = ? AND m.CRN <> ? AND '
+            . overlapsAny('m.time_Slot_ID', 1), [$sec['room_ID'], $sec['semester_ID'], $crn, $slot['time_Slot_ID']]);
+        if ($roomClash) $conflicts[] = "Room {$sec['room_ID']} is already used by {$roomClash['course_ID']} (CRN {$roomClash['CRN']}) at that time.";
+        if ($conflicts) fail(implode(' ', $conflicts));
+
+        run('UPDATE Course_Section SET time_Slot_ID = ? WHERE CRN = ?', [$slot['time_Slot_ID'], $crn]);
+        return ['message' => "{$sec['course_ID']} (CRN $crn) moved to the new time slot."];
+    });
+}
+
+// ---------- Admin: cancel a low-enrollment section and notify its students (UC13/14) ----------
+function cancelSection(int $adminId, array $form): array
+{
+    $crn = registrationCrn($form['CRN'] ?? null);
+    return transaction(function () use ($adminId, $crn) {
+        $sec = one('SELECT cs.CRN, cs.course_ID, c.course_Name, s.semester_Name, s.start_Date <= CURDATE() AS started,
+            (SELECT COUNT(*) FROM Enrollment e WHERE e.CRN = cs.CRN) AS enrolled
+          FROM Course_Section cs JOIN Course c ON c.course_ID = cs.course_ID JOIN Semester s ON s.semester_ID = cs.semester_ID
+          WHERE cs.CRN = ? FOR UPDATE', [$crn]);
+        if (!$sec) fail('That course section does not exist.');
+        if ($sec['started']) fail("{$sec['semester_Name']} has already started; a section can only be cancelled before the semester begins.");
+        if ((int) $sec['enrolled'] >= 5) {
+            fail("{$sec['course_ID']} (CRN $crn) has {$sec['enrolled']} students registered; only a section under 5 students can be cancelled this way.");
+        }
+
+        $students = rows('SELECT student_ID FROM Enrollment WHERE CRN = ? FOR UPDATE', [$crn]);
+        foreach ($students as $stu) {
+            sendMail((int) $stu['student_ID'], "IMPORTANT: {$sec['course_ID']} (CRN $crn) has been cancelled",
+                "{$sec['course_ID']} {$sec['course_Name']} (CRN $crn), {$sec['semester_Name']}, has been cancelled due to low enrollment. " .
+                'You have been dropped from this section. Please register for an alternate section before the add period ends.');
+        }
+        run('DELETE FROM Enrollment WHERE CRN = ?', [$crn]);
+        // "Marks the Class record as cancelled and removes it from the active schedule" -- the
+        // schema has no cancelled-flag column on Course_Section, so removing it from the active
+        // schedule means deleting the row (and its lab meeting, if it has one).
+        run('DELETE FROM Course_Section_Lab WHERE CRN = ?', [$crn]);
+        run('DELETE FROM Course_Section WHERE CRN = ?', [$crn]);
+        return ['message' => "Cancelled {$sec['course_ID']} (CRN $crn) and notified " . count($students) . ' student(s), who were dropped.'];
+    });
+}
+
+// ---------- Admin: register a student for a course section on their behalf (UC15/16) ----------
+// The spec lists this use case's actors as plain "Admin, Student" -- unlike every other admin
+// write action above, it is not marked "(read-write)", so no security-level check applies here.
+// index.php's generic security gate carries an explicit exception for this one action; every
+// other registration rule is still checked, by reusing checkAdd() exactly as addSection() does.
+function adminRegister(int $adminId, array $form): array
+{
+    $studentId = filter_var($form['student_ID'] ?? null, FILTER_VALIDATE_INT);
+    if ($studentId === false) fail('Choose a valid student.');
+    $crn = registrationCrn($form['CRN'] ?? null);
+    return transaction(function () use ($studentId, $crn) {
+        if (!one('SELECT 1 AS ok FROM Student WHERE student_ID = ?', [$studentId])) fail('That student account does not exist.');
+        $label = checkAdd($studentId, $crn, true);
+        run('INSERT INTO Enrollment (student_ID, CRN, grade) VALUES (?, ?, NULL)', [$studentId, $crn]);
+        return ['message' => "Registered student $studentId for $label."];
+    });
+}
+
+// ---------- Admin: place or remove a hold on a student account (UC21/22) ----------
+function placeHold(int $adminId, array $form): array
+{
+    return transaction(function () use ($adminId, $form) {
+        $studentId = filter_var($form['student_ID'] ?? null, FILTER_VALIDATE_INT);
+        if ($studentId === false) fail('Choose a valid student.');
+        if (!one('SELECT 1 AS ok FROM Student WHERE student_ID = ?', [$studentId])) fail('That student account does not exist.');
+        $hold = one('SELECT hold_ID FROM Hold WHERE hold_Type = ?', [(string) ($form['hold_Type'] ?? '')]);
+        if (!$hold) fail('Choose a hold type.');
+        if (one('SELECT 1 AS ok FROM Student_Hold WHERE student_ID = ? AND hold_ID = ?', [$studentId, $hold['hold_ID']])) {
+            fail('That student already has this hold.');
+        }
+        run('INSERT INTO Student_Hold (student_ID, hold_ID, hold_Date) VALUES (?, ?, CURDATE())', [$studentId, $hold['hold_ID']]);
+        logUpdate($adminId, 'Create', 'Hold', null, $form['hold_Type'], $studentId);
+        return ['message' => "Placed a {$form['hold_Type']} hold on student $studentId."];
+    });
+}
+
+function removeHold(int $adminId, array $form): array
+{
+    return transaction(function () use ($adminId, $form) {
+        $studentId = filter_var($form['student_ID'] ?? null, FILTER_VALIDATE_INT);
+        if ($studentId === false) fail('Choose a valid student.');
+        $hold = one('SELECT hold_ID FROM Hold WHERE hold_Type = ?', [(string) ($form['hold_Type'] ?? '')]);
+        if (!$hold) fail('Choose a hold type.');
+        if (!one('SELECT 1 AS ok FROM Student_Hold WHERE student_ID = ? AND hold_ID = ?', [$studentId, $hold['hold_ID']])) {
+            fail("That student does not have a {$form['hold_Type']} hold.");
+        }
+        run('DELETE FROM Student_Hold WHERE student_ID = ? AND hold_ID = ?', [$studentId, $hold['hold_ID']]);
+        logUpdate($adminId, 'Delete', 'Hold', $form['hold_Type'], null, $studentId);
+        return ['message' => "Removed the {$form['hold_Type']} hold from student $studentId."];
+    });
+}
+
+// ---------- Admin: update a user's personal information upon request (UC24/25) ----------
+function updateUserInfo(int $adminId, array $form): array
+{
+    return transaction(function () use ($adminId, $form) {
+        $userId = filter_var($form['user_ID'] ?? null, FILTER_VALIDATE_INT);
+        if ($userId === false) fail('Choose a valid user.');
+        $existing = one('SELECT first_Name, middle_Name, last_Name, gender, DOB, street, city, state, zip_Code
+          FROM User WHERE user_ID = ? FOR UPDATE', [$userId]);
+        if (!$existing) fail('That user account does not exist.');
+
+        $first = trim((string) ($form['first_Name'] ?? ''));
+        if ($first === '' || strlen($first) > 50) fail('Enter a first name (up to 50 characters).');
+        $last = trim((string) ($form['last_Name'] ?? ''));
+        if ($last === '' || strlen($last) > 50) fail('Enter a last name (up to 50 characters).');
+        $middle = trim((string) ($form['middle_Name'] ?? ''));
+        if (strlen($middle) > 50) fail('Middle name can be at most 50 characters.');
+        $middle = $middle !== '' ? $middle : null;
+        $gender = (string) ($form['gender'] ?? '');
+        if ($gender !== '' && !in_array($gender, ['Male', 'Female', 'Other'], true)) fail('Choose a valid gender, or leave it unspecified.');
+        $gender = $gender !== '' ? $gender : null;
+        $dobRaw = trim((string) ($form['DOB'] ?? ''));
+        $dob = null;
+        if ($dobRaw !== '') {
+            $d = DateTime::createFromFormat('Y-m-d', $dobRaw);
+            if (!$d || $d->format('Y-m-d') !== $dobRaw || $d > new DateTime()) fail('Enter a valid date of birth.');
+            $dob = $dobRaw;
+        }
+        [$street, $city, $state, $zip] = cleanAddress($form);
+
+        $new = ['first_Name' => $first, 'middle_Name' => $middle, 'last_Name' => $last, 'gender' => $gender,
+            'DOB' => $dob, 'street' => $street, 'city' => $city, 'state' => $state, 'zip_Code' => $zip];
+        foreach ($new as $field => $val) {
+            $old = $existing[$field] ?? null;
+            if ((string) $old !== (string) $val) {
+                logUpdate($adminId, 'Update', "User.$field", $old === null ? null : (string) $old, $val === null ? null : (string) $val, $userId);
+            }
+        }
+        run('UPDATE User SET first_Name = ?, middle_Name = ?, last_Name = ?, gender = ?, DOB = ?,
+            street = ?, city = ?, state = ?, zip_Code = ? WHERE user_ID = ?',
+            [$first, $middle, $last, $gender, $dob, $street, $city, $state, $zip, $userId]);
+        return ['message' => "Updated information for $first $last (ID $userId)."];
+    });
+}
+
 // A letter grade in Enrollment.grade/Student_History.grade, newest earned first (matches GRADE_ORDER).
 const VALID_GRADES = ['A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'F'];
 
