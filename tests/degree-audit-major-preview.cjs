@@ -86,7 +86,7 @@ async function main() {
     await major.getByText('B.A. in Economics', { exact: true }).waitFor();
     await major.getByText('B.S. in Mathematics', { exact: true }).waitFor();
     await section('Minor requirements').getByText('Minor in Psychology', { exact: true }).waitFor();
-    await section('Total credits earned').getByText('56 credits', { exact: true }).waitFor();
+    await section('Total credits earned').getByText('59 credits', { exact: true }).waitFor();
     await section('What still counts').getByText(/draft/).first().waitFor();
     await section('What you’d still need').getByText('Degree credit requirements · Rules unavailable', { exact: true }).waitFor();
 
@@ -112,7 +112,7 @@ async function main() {
     const { audit: noRules } = await load('?preview_major=NOMAP-BS');
     assert.deepEqual(primary(noRules).requirements, []);
     assert.equal(noRules.preview.primary_status, 'Rules unavailable');
-    assert.equal(noRules.credits.earned_provisional, 56);
+    assert.equal(noRules.credits.earned_provisional, 59);
 
     for (const query of ['preview_major=UNKNOWN', 'preview_major=CS-MS', 'preview_major=MATH-BS', 'preview_major=CS-BS',
       'preview_major%5B%5D=ECON-BS']) {
@@ -139,7 +139,7 @@ async function main() {
     await page.goto(base + '/#degree-audit');
     await major.getByText('B.A. in Economics', { exact: true }).waitFor();
     assert.deepEqual(errors, []);
-    console.log('PASS: CS to Economics preview and real change agree, 56 earned credits and transcript unchanged, preserved secondary major and minor, unavailable and invalid rules, unauthenticated rejection, no preview writes.');
+    console.log('PASS: CS to Economics preview and real change agree, 59 earned credits and transcript unchanged, preserved secondary major and minor, unavailable and invalid rules, unauthenticated rejection, no preview writes.');
   } finally {
     await browser.close();
   }

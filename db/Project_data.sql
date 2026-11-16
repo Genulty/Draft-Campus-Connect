@@ -1835,7 +1835,7 @@ INSERT INTO Undergraduate_Student (student_ID, dept_ID, undergraduate_Student_Ty
 
 -- Full_Time_Undergraduate: 129 rows
 INSERT INTO Full_Time_Undergraduate (student_ID, status, min_Credits, max_Credits, credits_Earned) VALUES
-  (100001, 'Good Standing', 12, 16, 56),
+  (100001, 'Good Standing', 12, 16, 59),
   (100002, 'Good Standing', 12, 16, 45),
   (100003, 'Good Standing', 12, 16, 28),
   (100004, 'Good Standing', 12, 16, 6),
@@ -1857,14 +1857,14 @@ INSERT INTO Full_Time_Undergraduate (student_ID, status, min_Credits, max_Credit
   (100028, 'Good Standing', 12, 16, 0),
   (100029, 'Good Standing', 12, 16, 24),
   (100030, 'Good Standing', 12, 16, 24),
-  (100031, 'Good Standing', 12, 16, 33),
+  (100031, 'Good Standing', 12, 16, 36),
   (100032, 'Good Standing', 12, 16, 37),
   (100035, 'Good Standing', 12, 16, 50),
   (100036, 'Good Standing', 12, 16, 0),
   (100037, 'Good Standing', 12, 16, 20),
   (100038, 'Good Standing', 12, 16, 25),
   (100039, 'Good Standing', 12, 16, 46),
-  (100040, 'Good Standing', 12, 16, 48),
+  (100040, 'Good Standing', 12, 16, 51),
   (100041, 'Good Standing', 12, 16, 0),
   (100042, 'Good Standing', 12, 16, 37),
   (100043, 'Good Standing', 12, 16, 48),
@@ -1896,7 +1896,7 @@ INSERT INTO Full_Time_Undergraduate (student_ID, status, min_Credits, max_Credit
   (100083, 'Good Standing', 12, 16, 0),
   (100084, 'Good Standing', 12, 16, 44),
   (100086, 'Good Standing', 12, 16, 24),
-  (100088, 'Good Standing', 12, 16, 44),
+  (100088, 'Good Standing', 12, 16, 47),
   (100089, 'Academic Probation', 12, 16, 18),
   (100090, 'Good Standing', 12, 16, 25),
   (100091, 'Good Standing', 12, 16, 0),
@@ -1911,7 +1911,7 @@ INSERT INTO Full_Time_Undergraduate (student_ID, status, min_Credits, max_Credit
   (100102, 'Good Standing', 12, 16, 34),
   (100104, 'Good Standing', 12, 16, 22),
   (100105, 'Good Standing', 12, 16, 0),
-  (100108, 'Good Standing', 12, 16, 48),
+  (100108, 'Good Standing', 12, 16, 51),
   (100109, 'Good Standing', 12, 16, 12),
   (100111, 'Good Standing', 12, 16, 46),
   (100113, 'Good Standing', 12, 16, 50),
@@ -14085,5 +14085,23 @@ INSERT INTO Student_History (student_ID, CRN, course_ID, semester_ID, grade) VAL
   (100124, 10945, 'PSY225', 'SP26', 'B'),
   (100142, 10945, 'PSY225', 'SP26', 'A-'),
   (100158, 10945, 'PSY225', 'SP26', 'B-');
+
+-- Demo student completes Mathematics Proficiency, Nov 17, 2026 (database/migrations/2026-11-17-demo-student-math.sql)
+INSERT INTO Course_Section (CRN, course_ID, section_No, faculty_ID, time_Slot_ID, room_ID, semester_ID, max_Seats) VALUES
+  (10946, 'MATH110', '003', 200011, 11, 'ACB-103', 'FA24', 10);
+INSERT INTO Faculty_History (faculty_ID, CRN, course_ID, semester_ID) VALUES
+  (200011, 10946, 'MATH110', 'FA24');
+INSERT INTO Enrollment (student_ID, CRN, grade) VALUES
+  (100001, 10946, 'B+'),
+  (100031, 10946, 'B'),
+  (100040, 10946, 'A-'),
+  (100088, 10946, 'C+'),
+  (100108, 10946, 'B');
+INSERT INTO Student_History (student_ID, CRN, course_ID, semester_ID, grade) VALUES
+  (100001, 10946, 'MATH110', 'FA24', 'B+'),
+  (100031, 10946, 'MATH110', 'FA24', 'B'),
+  (100040, 10946, 'MATH110', 'FA24', 'A-'),
+  (100088, 10946, 'MATH110', 'FA24', 'C+'),
+  (100108, 10946, 'MATH110', 'FA24', 'B');
 
 SET FOREIGN_KEY_CHECKS = 1;
