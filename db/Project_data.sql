@@ -1835,7 +1835,7 @@ INSERT INTO Undergraduate_Student (student_ID, dept_ID, undergraduate_Student_Ty
 
 -- Full_Time_Undergraduate: 129 rows
 INSERT INTO Full_Time_Undergraduate (student_ID, status, min_Credits, max_Credits, credits_Earned) VALUES
-  (100001, 'Good Standing', 12, 16, 50),
+  (100001, 'Good Standing', 12, 16, 56),
   (100002, 'Good Standing', 12, 16, 45),
   (100003, 'Good Standing', 12, 16, 28),
   (100004, 'Good Standing', 12, 16, 6),
@@ -1870,7 +1870,7 @@ INSERT INTO Full_Time_Undergraduate (student_ID, status, min_Credits, max_Credit
   (100043, 'Good Standing', 12, 16, 48),
   (100044, 'Academic Probation', 12, 16, 30),
   (100049, 'Good Standing', 12, 16, 47),
-  (100050, 'Good Standing', 12, 16, 46),
+  (100050, 'Good Standing', 12, 16, 49),
   (100052, 'Good Standing', 12, 16, 32),
   (100053, 'Good Standing', 12, 16, 0),
   (100054, 'Academic Probation', 12, 16, 44),
@@ -1920,7 +1920,7 @@ INSERT INTO Full_Time_Undergraduate (student_ID, status, min_Credits, max_Credit
   (100116, 'Good Standing', 12, 16, 25),
   (100117, 'Good Standing', 12, 16, 52),
   (100122, 'Good Standing', 12, 16, 33),
-  (100124, 'Good Standing', 12, 16, 43),
+  (100124, 'Good Standing', 12, 16, 46),
   (100125, 'Good Standing', 12, 16, 0),
   (100127, 'Good Standing', 12, 16, 19),
   (100128, 'Good Standing', 12, 16, 0),
@@ -1933,7 +1933,7 @@ INSERT INTO Full_Time_Undergraduate (student_ID, status, min_Credits, max_Credit
   (100138, 'Good Standing', 12, 16, 48),
   (100139, 'Good Standing', 12, 16, 24),
   (100140, 'Good Standing', 12, 16, 0),
-  (100142, 'Good Standing', 12, 16, 24),
+  (100142, 'Good Standing', 12, 16, 27),
   (100144, 'Good Standing', 12, 16, 0),
   (100145, 'Good Standing', 12, 16, 49),
   (100146, 'Good Standing', 12, 16, 48),
@@ -1944,7 +1944,7 @@ INSERT INTO Full_Time_Undergraduate (student_ID, status, min_Credits, max_Credit
   (100154, 'Good Standing', 12, 16, 47),
   (100155, 'Academic Probation', 12, 16, 42),
   (100157, 'Good Standing', 12, 16, 46),
-  (100158, 'Good Standing', 12, 16, 21),
+  (100158, 'Good Standing', 12, 16, 24),
   (100160, 'Good Standing', 12, 16, 24),
   (100161, 'Good Standing', 12, 16, 0),
   (100162, 'Good Standing', 12, 16, 0),
@@ -14065,5 +14065,25 @@ INSERT INTO Course_Section (CRN, course_ID, section_No, faculty_ID, time_Slot_ID
   (10942, 'CS360', '001', 200001, 9, 'ACB-101', 'SP27', 10),
   (10943, 'CS370', '001', 200005, 3, 'ACB-103', 'SP27', 10),
   (10944, 'CS465', '001', 200005, 10, 'ACB-104', 'SP27', 10);
+
+-- Demo student completes Diversity, Nov 17, 2026 (database/migrations/2026-11-17-demo-student-diversity.sql)
+INSERT INTO Course_Section (CRN, course_ID, section_No, faculty_ID, time_Slot_ID, room_ID, semester_ID, max_Seats) VALUES
+  (10945, 'PSY225', '003', 200042, 4, 'ACB-101', 'SP26', 10);
+INSERT INTO Faculty_History (faculty_ID, CRN, course_ID, semester_ID) VALUES
+  (200042, 10945, 'PSY225', 'SP26');
+INSERT INTO Enrollment (student_ID, CRN, grade) VALUES
+  (100001, 10181, 'B+'),
+  (100001, 10945, 'A-'),
+  (100050, 10945, 'B+'),
+  (100124, 10945, 'B'),
+  (100142, 10945, 'A-'),
+  (100158, 10945, 'B-');
+INSERT INTO Student_History (student_ID, CRN, course_ID, semester_ID, grade) VALUES
+  (100001, 10181, 'PSY110', 'SP25', 'B+'),
+  (100001, 10945, 'PSY225', 'SP26', 'A-'),
+  (100050, 10945, 'PSY225', 'SP26', 'B+'),
+  (100124, 10945, 'PSY225', 'SP26', 'B'),
+  (100142, 10945, 'PSY225', 'SP26', 'A-'),
+  (100158, 10945, 'PSY225', 'SP26', 'B-');
 
 SET FOREIGN_KEY_CHECKS = 1;
