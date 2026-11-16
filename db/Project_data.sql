@@ -14049,4 +14049,21 @@ INSERT INTO Major_Course_Requirement (major_ID, course_ID, min_Grade_Req) VALUES
   ('CS-BS', 'CS480', 'D'),
   ('CS-BS', 'MATH360', 'D');
 
+-- CS elective courses added Nov 17, 2026 (database/migrations/2026-11-17-degree-audit-rules.sql)
+INSERT INTO Course (course_ID, course_Name, dept_ID, course_Credits, course_Desc, course_Type) VALUES
+  ('CS350', 'Web Development', 'CS', 3, 'HTML, CSS and JavaScript, server-side programming, databases on the web and deploying a web application.', 'Undergraduate'),
+  ('CS360', 'Mobile App Development', 'CS', 3, 'Designing and building apps for phones and tablets: interfaces, local storage, networking and publishing.', 'Undergraduate'),
+  ('CS370', 'Computer Graphics', 'CS', 3, 'Transformations, the rendering pipeline, lighting and shading, textures and an introduction to animation.', 'Undergraduate'),
+  ('CS465', 'Cloud Computing', 'CS', 3, 'Virtualization, containers, cloud storage and services, scaling and the cost and security of cloud systems.', 'Undergraduate');
+INSERT INTO Course_Prerequisite (course_ID, prerequisite_Course_ID, min_Grade_Req) VALUES
+  ('CS350', 'CS115', 'C'),
+  ('CS360', 'CS115', 'C'),
+  ('CS370', 'MATH220', 'C'),
+  ('CS465', 'CS450', 'C');
+INSERT INTO Course_Section (CRN, course_ID, section_No, faculty_ID, time_Slot_ID, room_ID, semester_ID, max_Seats) VALUES
+  (10941, 'CS350', '001', 200001, 2, 'ACB-102', 'SP27', 10),
+  (10942, 'CS360', '001', 200001, 9, 'ACB-101', 'SP27', 10),
+  (10943, 'CS370', '001', 200005, 3, 'ACB-103', 'SP27', 10),
+  (10944, 'CS465', '001', 200005, 10, 'ACB-104', 'SP27', 10);
+
 SET FOREIGN_KEY_CHECKS = 1;
