@@ -17,7 +17,7 @@ function loadAuditSupplementalPolicy(string $programId, int $studentId, string $
             FROM Degree_Audit_Supplemental_Course m JOIN Course c ON c.course_ID = m.course_ID
             WHERE m.program_ID = ? ORDER BY m.requirement_ID, m.course_ID', [$programId]);
         // Use the most recent recorded result as of the audit date for each configured assessment.
-        $placements = rows('SELECT p.requirement_ID AS id, r.score >= p.minimum_Score AS met
+        $placements = rows('SELECT p.requirement_ID AS id, r.score >= p.minimum_Score AS met, r.score IS NOT NULL AS attempted
             FROM Degree_Audit_Placement_Criterion p LEFT JOIN Student_Placement_Result r
               ON r.student_ID = ? AND r.assessment_Code = p.assessment_Code
               AND r.assessed_On = (
@@ -35,6 +35,7 @@ function loadAuditSupplementalPolicy(string $programId, int $studentId, string $
     foreach ($placements as $placement) {
         $id = $placement['id'];
         $policy[$id]['placement_configured'] = true;
+        $policy[$id]['placement_attempted'] = !empty($policy[$id]['placement_attempted']) || (bool) $placement['attempted'];
         $policy[$id]['placement_met'] = !empty($policy[$id]['placement_met']) || (bool) $placement['met'];
     }
     return $policy;
@@ -97,6 +98,7 @@ function auditSupplementalRequirements(array $policy, bool $undergraduate, calla
             }
         }
         $results[$id] = ['id' => $id, 'name' => $name, 'draft' => $draft, 'options' => $options,
+            'placement_configured' => !empty($rule['placement_configured']),
             'configured' => !empty($rule['options']) || !empty($rule['placement_configured'])];
         // With three requirements, at most two peers can block distinct courses.
         // Keep the first three viable options of each positive status to bound the search.
@@ -128,12 +130,16 @@ function auditSupplementalRequirements(array $policy, bool $undergraduate, calla
         } elseif ($match) {
             $result += array_intersect_key($match, ['status' => null, 'detail' => null, 'course' => null, 'minimum_grade' => null, 'sharing_restricted' => null]);
             if ($id !== 'DIVERSITY' && $result['status'] === 'Completed') $result['detail'] = 'Met by coursework';
-        } elseif (!empty($rule['placement_configured'])) {
-            $result += ['status' => 'Not completed', 'detail' => 'Still needed · No qualifying placement result on file.', 'course' => null];
+        } elseif ($result['placement_configured']) {
+            $result += ['status' => 'Not started', 'detail' => 'No placement result on file.', 'course' => null];
         } else {
             $detail = $id === 'DIVERSITY' ? 'Diversity course mappings are unavailable.'
                 : 'Placement criteria and coursework mappings are unavailable.';
             $result += ['status' => 'Rules unavailable', 'detail' => $detail, 'course' => null];
+        }
+        if ($result['status'] === 'Not started' && !empty($rule['placement_attempted'])) {
+            $result['status'] = 'Not completed';
+            $result['detail'] = 'The recorded placement result does not meet the threshold.';
         }
     }
     unset($result);

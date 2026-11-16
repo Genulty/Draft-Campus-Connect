@@ -216,7 +216,7 @@ check($a['diversity']['status']==='In progress' && $a['diversity']['course']['co
     && $a['diversity']['options'][0]['status']==='Not completed',
     'Exclusive Diversity policy reused a course already applied to another block.');
 $a = calculateDegreeAudit($profile, [], [], [], [$future], [], null, [
-    'DIVERSITY'=>['options'=>[$c2]], 'MATH'=>['placement_configured'=>true,'placement_met'=>false],
+    'DIVERSITY'=>['options'=>[$c2]], 'MATH'=>['placement_configured'=>true,'placement_attempted'=>true,'placement_met'=>false],
 ]);
 check($a['diversity']['status']==='Not completed' && $a['proficiency']['requirements'][0]['status']==='Not completed'
     && $a['proficiency']['requirements'][1]['status']==='Rules unavailable',
@@ -240,7 +240,7 @@ $electivePolicy = [
 ];
 $a = calculateDegreeAudit($profile,$programs,$requirements,[$retry,$alt,$c4],[$c3Active],$genEd,null,[],$electivePolicy);
 check($a['major_electives']['status']==='In progress' && $a['major_electives']['applied']===1
-    && $a['major_electives']['in_progress_credits']===3, 'Current elective credit inflated the earned count.');
+    && $a['major_electives']['in_progress']===1, 'Current elective credit inflated the earned count.');
 check($a['free_electives']['status']==='Completed' && $a['free_electives']['applied']===3
     && array_column($a['free_electives']['courses'],'code')===['C4']
     && $a['credits']['earned_provisional']===10, 'Free electives reused claimed courses or changed the overall credits.');
@@ -266,5 +266,43 @@ $a = calculateDegreeAudit($profile,[],[],[],[],[]);
 check(!$a['diversity']['configured'] && !$a['proficiency']['configured']
     && $a['major_electives']['status']==='Rules unavailable' && $a['free_electives']['status']==='Rules unavailable',
     'An unconfigured block was treated as an unmet rule.');
+$blockedMajor = ['MAJOR'=>['unit'=>'COURSES','target'=>3,'draft'=>true,'share'=>true,
+    'options'=>[$elective('C1')]]];
+$a = calculateDegreeAudit($profile,$programs,$requirements,[$retry],[],[],null,[],$blockedMajor);
+check(!$a['major_electives']['configured'] && $a['major_electives']['status']==='Rules unavailable'
+    && !$a['major_electives']['options'] && str_contains($a['major_electives']['detail'],'primary major'),
+    'A required primary major course qualified as a major elective.');
+$a = calculateDegreeAudit($profile,$programs,$requirements,[],[],[],null,[],$blockedMajor);
+check(!$a['major_electives']['configured'] && $a['programs'][0]['requirements'][0]['status']==='Not completed',
+    'A required course with no activity became an elective or changed its required-course status.');
+
+$demoPolicy = [
+    'MAJOR'=>['unit'=>'COURSES','target'=>2,'draft'=>true,'options'=>[$elective('C2'),$elective('C3'),$elective('C5')]],
+    'FREE'=>['unit'=>'CREDITS','target'=>3,'draft'=>true,'options'=>[$elective('C1'),$elective('C4'),$elective('C6')]],
+];
+$c6 = array_replace($retry,['code'=>'C6','section_course'=>'C6','crn'=>10]);
+$placementRule = ['MATH'=>['draft'=>true,'placement_configured'=>true,'options'=>[$elective('C5')]]];
+$a = calculateDegreeAudit($profile,$programs,$requirements,[$retry,$alt,$c4,$c6],[$c3Active],$genEd,null,$placementRule,$demoPolicy);
+$major = $a['major_electives'];
+$free = $a['free_electives'];
+check($major['applied']===1 && $major['in_progress']===1 && $major['choose_one']
+    && array_column($major['options'],'code')===['C5'], 'The remaining choices still include applied or current elective courses.');
+check($free['applied']===3 && array_column($free['courses'],'code')===['C4']
+    && array_column($free['eligible_not_applied'],'code')===['C6']
+    && array_column($free['excluded'],'code')===['C1'] && $free['excluded'][0]['sharing_restricted'],
+    'Eligible surplus and courses excluded by allocation were not distinguished.');
+$math = $a['proficiency']['requirements'][0];
+check($math['status']==='Not started' && $math['placement_configured'] && $math['course']===null,
+    'Math placement is hidden or misclassified without a recorded assessment.');
+$checklist = array_column($a['degree_requirements']['checklist'],null,'name');
+check($checklist['General Education']['draft'] && !$checklist['Diversity']['draft']
+    && $checklist['Proficiency']['draft'] && $checklist['Major Electives']['draft'] && $checklist['Free Electives']['draft'],
+    'Draft checklist labels are missing or shown for an unconfigured block.');
+
+$a = calculateDegreeAudit($profile,[],[],[],[],[],null,[],$demoPolicy);
+check($a['major_electives']['status']==='Not started' && !$a['major_electives']['choose_one'],
+    'An untouched multi-course target was treated as attempted or satisfiable by one course.');
+$a = calculateDegreeAudit($profile,[],[],[array_replace($failing,['code'=>'C2','section_course'=>'C2'])],[],[],null,[],$demoPolicy);
+check($a['major_electives']['status']==='Not completed', 'A failed elective attempt was treated as not started.');
 echo 'PASS: SELECT-only comparisons for '.count($students).' existing students and pure calculation edge cases (no DB fixtures).'.PHP_EOL;
 echo json_encode($coverage,JSON_PRETTY_PRINT).PHP_EOL;

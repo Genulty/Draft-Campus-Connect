@@ -111,7 +111,7 @@ function loadDegreeCreditPolicy(string $primaryMajorId): ?array
 }
 
 // Evaluate a catalog course against recognized, reconciled transcript and enrollment evidence.
-function evaluateAuditCourse(array $rule, array $best, array $active, array $future, array $needsReview): array
+function evaluateAuditCourse(array $rule, array $best, array $active, array $future, array $needsReview, bool $distinguishNotStarted = false): array
 {
     $code = $rule['code'];
     $minimum = auditGradeRank($rule['minimum_grade']);
@@ -135,13 +135,13 @@ function evaluateAuditCourse(array $rule, array $best, array $active, array $fut
             : "Transcript grade {$course['grade']} is below the {$rule['minimum_grade']} minimum.";
         return $match('Not completed', $detail, $course);
     }
-    return $match('Not completed', 'No qualifying course record is on file.');
+    return $match($distinguishNotStarted ? 'Not started' : 'Not completed', 'No qualifying course record is on file.');
 }
 
 // Pick the strongest outcome among alternative catalog courses.
 function auditBestCourseOption(array $options): ?array
 {
-    $priority = ['Not completed' => 1, 'In progress' => 2, 'Rules unavailable' => 3, 'Review needed' => 4, 'Completed' => 5];
+    $priority = ['Not started' => 0, 'Not completed' => 1, 'In progress' => 2, 'Rules unavailable' => 3, 'Review needed' => 4, 'Completed' => 5];
     $best = null;
     foreach ($options as $option) {
         if ($best === null || $priority[$option['status']] > $priority[$best['status']]
@@ -157,7 +157,7 @@ function auditRequirementBlockStatus(array $requirements): string
     if (!$requirements) return 'Rules unavailable';
 
     $statuses = array_column($requirements, 'status');
-    foreach (['Rules unavailable', 'Review needed', 'In progress', 'Not completed'] as $status) {
+    foreach (['Rules unavailable', 'Review needed', 'In progress', 'Not completed', 'Not started'] as $status) {
         if (in_array($status, $statuses, true)) return $status;
     }
     return 'Completed';
@@ -181,6 +181,7 @@ function auditCreditRequirements(
             $courses[] = ['status' => 'In progress'] + $course;
         }
     }
+    $liberalActivity = array_intersect_key($best, $eligible);
     $liberal = [
         'credits_required' => $liberalTarget, 'credits_applied' => $applied,
         'credits_still_needed' => $applied === null ? null : $liberalTarget - $applied,
@@ -188,7 +189,8 @@ function auditCreditRequirements(
             $applied === null => 'Rules unavailable',
             $applied >= $liberalTarget => 'Completed',
             (bool) $courses => 'In progress',
-            default => 'Not completed',
+            (bool) $liberalActivity => 'Not completed',
+            default => 'Not started',
         },
         'draft' => (bool) ($policy['draft'] ?? false),
         'courses' => $courses,
@@ -201,8 +203,8 @@ function auditCreditRequirements(
         $checklist[] = ['name' => $program['kind'] . ' · ' . $program['name'],
             'status' => auditRequirementBlockStatus($program['requirements'])];
     }
-    if ($undergraduate) $checklist[] = ['name' => 'General Education', 'status' => auditRequirementBlockStatus($genEd)];
-    if ($undergraduate || $liberalTarget !== null) $checklist[] = ['name' => 'Liberal Arts', 'status' => $liberal['status']];
+    if ($undergraduate) $checklist[] = ['name' => 'General Education', 'status' => auditRequirementBlockStatus($genEd), 'draft' => (bool) $genEd];
+    if ($undergraduate || $liberalTarget !== null) $checklist[] = ['name' => 'Liberal Arts', 'status' => $liberal['status'], 'draft' => $liberal['draft'] && $liberal['status'] !== 'Rules unavailable'];
 
     $earnedTotal = array_sum($earned);
     return [
@@ -345,13 +347,16 @@ function calculateDegreeAudit(array $profile, array $programs, array $requiremen
     );
     $requiredMatches = array_merge($genEdRequirements, ...array_column($programs, 'requirements'));
     $claims = auditLiberalArtsClaims(auditCourseClaims($requiredMatches), $creditRequirements['liberal_arts']);
-    $extra = auditSupplementalRequirements($supplemental, $profile['type'] === 'Undergraduate', $evaluate, $claims);
-    $electives = auditElectiveRequirements($electivePolicy, $evaluate, $claims, $extra, $supplemental);
+    $evaluateOptional = static fn (array $rule) => evaluateAuditCourse($rule, $best, $activeByCode, $futureByCode, $reviewCourses, true);
+    $extra = auditSupplementalRequirements($supplemental, $profile['type'] === 'Undergraduate', $evaluateOptional, $claims);
+    $primary = $programs[0] ?? [];
+    $requiredMajorCodes = !empty($primary['is_primary']) ? array_column($primary['requirements'], 'code') : [];
+    $electives = auditElectiveRequirements($electivePolicy, $evaluateOptional, $claims, $extra, $supplemental, $requiredMajorCodes);
     foreach (['diversity' => 'Diversity', 'proficiency' => 'Proficiency',
         'major_electives' => 'Major Electives', 'free_electives' => 'Free Electives'] as $key => $name) {
         $result = $extra[$key] ?? $electives[$key] ?? null;
         if ($result !== null) $creditRequirements['degree_requirements']['checklist'][] = [
-            'name' => $name, 'status' => $result['status'],
+            'name' => $name, 'status' => $result['status'], 'draft' => $result['draft'],
         ];
     }
     return $creditRequirements + $extra + $electives + [
