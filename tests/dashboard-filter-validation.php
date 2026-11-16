@@ -6,6 +6,8 @@ $bound = [];
 function rows(string $sql, array $params = []): array {
     if (str_contains($sql,'FROM Semester')) return $GLOBALS['semesters'];
     if (str_contains($sql,'FROM Department')) return [['dept_ID'=>'CS','dept_Name'=>'Computer Science'],['dept_ID'=>'BIO','dept_Name'=>'Biology']];
+    // Course, faculty and room filter options (no sections in this fixture).
+    if (str_contains($sql,'SELECT DISTINCT cs.') || str_contains($sql,'FROM Room WHERE')) return [];
     throw new RuntimeException('Unexpected fixture query');
 }
 function one(string $sql, array $params = []): ?array {
@@ -13,7 +15,7 @@ function one(string $sql, array $params = []): ?array {
     throw new RuntimeException('Unexpected fixture query');
 }
 function run(string $sql, array $params = []): object {
-    if (!str_starts_with($sql,'SELECT ') || substr_count($sql,'?') !== 3) throw new RuntimeException('Unexpected query');
+    if (!str_starts_with($sql,'SELECT ') || substr_count($sql,'?') !== 10) throw new RuntimeException('Unexpected query');
     $GLOBALS['bound']=$params;
     return new class {
         public function columnCount(): int { return 0; }
@@ -35,7 +37,7 @@ $cases = [
 foreach ($cases as [$query,$semester,$dept]) {
     $page=buildView(['id'=>1,'role'=>'Student'],'master-schedule',$query);
     $filters=$page['blocks'][0]['filters'];
-    if ($filters[0]['value'] !== $semester || $filters[1]['value'] !== $dept || $bound !== [$semester,$dept,$dept]) throw new RuntimeException('Filter validation or binding mismatch');
+    if ($filters[0]['value'] !== $semester || $filters[1]['value'] !== $dept || $bound !== [$semester,$dept,$dept,'','','','','','','']) throw new RuntimeException('Filter validation or binding mismatch');
     if (!in_array('FA26',array_column($filters[0]['options'],0),true) || !in_array('SP27',array_column($filters[0]['options'],0),true)) throw new RuntimeException('Semester option lost');
 }
 if (buildView(['id'=>1,'role'=>'StatDept'],'master-schedule',[]) !== null) throw new RuntimeException('Role guard bypassed');
