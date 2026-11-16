@@ -152,9 +152,8 @@ function verifyPasswordChangeCode(int $userId, array $form): array
 }
 function adminSendReset(int $adminId, array $form): array
 {
+    if (!adminCanUpdate($adminId)) fail('Read-Only admins cannot reset passwords.');
     requireRecoveryDelivery();
-    $admin = one('SELECT security_Level FROM Admin WHERE admin_ID = ?',[$adminId]);
-    if (!$admin || $admin['security_Level'] !== 'Read-Write') fail('Read-Only admins cannot reset passwords.');
     $name = is_string($form['login'] ?? null) ? trim($form['login']) : '';
     $login = $name === '' ? null : findLogin($name);
     if (!$login) fail('No account matches that email or ID.');

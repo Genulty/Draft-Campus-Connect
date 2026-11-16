@@ -529,6 +529,13 @@ function viewAdvisees(array $u, array $q): array
 
 // ---------------- Admin ----------------
 
+// Admin security levels (A-R2): Read-Write admins can view and update records; Read-Only admins can only view them.
+const READ_ONLY_NOTICE = 'Read-Only access: you can view this page, but only Read-Write admins can make changes.';
+function adminLevelLabel(int $adminId): string
+{
+    return adminCanUpdate($adminId) ? 'Read-Write (view and update)' : 'Read-Only (view only)';
+}
+
 function viewAdminOverview(array $u, array $q): array
 {
     $a = one('SELECT security_Level FROM Admin WHERE admin_ID = ?', [$u['id']]);
@@ -540,8 +547,11 @@ function viewAdminOverview(array $u, array $q): array
         (SELECT COUNT(*) FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN WHERE cs.semester_ID = ?) AS enrollments,
         (SELECT COUNT(DISTINCT student_ID) FROM Student_Hold) AS holds,
         (SELECT COUNT(*) FROM Login WHERE lock_Var = 1) AS locked', [$cur['id'], $cur['id']]);
-    return ['title' => "Welcome, {$u['name']}", 'subtitle' => "{$a['security_Level']} administrator", 'blocks' => [
-        stats([['Students', $c['students']], ['Faculty', $c['faculty']], ['Departments', $c['depts']], ['Courses', $c['courses']],
+    $subtitle = $a['security_Level'] === 'Read-Write'
+        ? 'Read-Write administrator: you can view and update records.'
+        : 'Read-Only administrator: you can view records but not change them.';
+    return ['title' => "Welcome, {$u['name']}", 'subtitle' => $subtitle, 'blocks' => [
+        stats([['Security level', adminLevelLabel((int) $u['id'])], ['Students', $c['students']], ['Faculty', $c['faculty']], ['Departments', $c['depts']], ['Courses', $c['courses']],
             ["{$cur['name']} sections", $c['sections']], ["{$cur['name']} enrollments", $c['enrollments']],
             ['Students with holds', $c['holds']], ['Locked accounts', $c['locked']]]),
         table('Departments', "SELECT d.dept_ID AS ID, d.dept_Name AS Department, CONCAT(u.first_Name, ' ', u.last_Name) AS Chair,
@@ -576,22 +586,32 @@ function viewAudit(array $u, array $q): array
 // Create a course section (A-R26) for an upcoming semester.
 function viewCreateCourse(array $u, array $q): array
 {
-    $page = ['title' => 'Create a course', 'blocks' => []];
+    $depts = departments();
+    $deptId = in_array($q['dept_ID'] ?? null, array_column($depts, 'dept_ID'), true) ? $q['dept_ID'] : '';
+    // The chosen department's current courses, so a new course doesn't repeat one.
+    $existing = $deptId === '' ? null : table("Courses already in {$deptId}", "SELECT c.course_ID AS Course, c.course_Name AS Title,
+        c.course_Credits AS Credits, c.course_Type AS Level FROM Course c WHERE c.dept_ID = ? ORDER BY c.course_ID", [$deptId]);
     if (!adminCanUpdate((int) $u['id'])) {
-        return $page + ['subtitle' => 'Course creation requires Read-Write access.'];
+        // Read-Only admins see no creation form at all (the catalog is on the Courses page).
+        return ['title' => 'Create a course', 'subtitle' => READ_ONLY_NOTICE, 'blocks' => []];
     }
-    $page['blocks'][] = ['type' => 'form', 'title' => 'New catalog course',
-        'endpoint' => 'create-course', 'submit' => 'Create course', 'fields' => [
-            ['name' => 'course_ID', 'label' => 'Course ID', 'value' => '', 'required' => true, 'maxLength' => 10],
-            ['name' => 'course_Name', 'label' => 'Course title', 'value' => '', 'required' => true, 'maxLength' => 100],
-            ['name' => 'dept_ID', 'label' => 'Department', 'value' => '', 'required' => true,
-                'options' => array_merge([['', 'Choose a department']], array_map(fn ($d) => [$d['dept_ID'], $d['dept_Name']], departments()))],
-            ['name' => 'course_Credits', 'label' => 'Credits', 'value' => '', 'type' => 'number', 'min' => 1, 'max' => 6, 'step' => 1, 'required' => true],
-            ['name' => 'course_Type', 'label' => 'Course type', 'value' => '', 'required' => true,
-                'options' => [['', 'Choose a course type'], ['Undergraduate', 'Undergraduate'], ['Graduate', 'Graduate']]],
-            ['name' => 'course_Desc', 'label' => 'Description (optional)', 'value' => '', 'maxLength' => 500],
-        ]];
-    return $page;
+    $v = fn (string $name) => is_string($q[$name] ?? null) ? $q[$name] : '';
+    return ['title' => 'Create a course', 'subtitle' => 'Adds a course to the catalog. Sections are scheduled separately on Create section.', 'blocks' => [
+        ['type' => 'form', 'title' => 'New catalog course', 'endpoint' => 'create-course', 'submit' => 'Create course', 'keep' => true,
+            'note' => 'Course ID: the department code and a 3-digit number, for example CHEM350. Undergraduate courses use 100–499 and graduate courses 500–699.',
+            'fields' => [
+            ['name' => 'dept_ID', 'label' => 'Department', 'value' => $deptId, 'required' => true, 'reload' => 'dept_ID', 'keepOnReload' => true,
+                'options' => array_merge([['', 'Choose a department']], array_map(fn ($d) => [$d['dept_ID'], $d['dept_Name']], $depts))],
+            ['name' => 'course_ID', 'label' => 'Course ID', 'value' => $v('course_ID'), 'required' => true, 'maxLength' => 7,
+                'placeholder' => $deptId === '' ? 'e.g. CHEM350' : "e.g. {$deptId}350"],
+            ['name' => 'course_Name', 'label' => 'Course title', 'value' => $v('course_Name'), 'required' => true, 'maxLength' => 100],
+            ['name' => 'course_Credits', 'label' => 'Credits', 'value' => $v('course_Credits') ?: '3', 'type' => 'number', 'min' => 1, 'max' => 6, 'step' => 1, 'required' => true],
+            ['name' => 'course_Type', 'label' => 'Course level', 'value' => $v('course_Type') ?: 'Undergraduate', 'required' => true,
+                'options' => [['Undergraduate', 'Undergraduate (100–499)'], ['Graduate', 'Graduate (500–699)']]],
+            ['name' => 'course_Desc', 'label' => 'Description (optional)', 'value' => $v('course_Desc'), 'maxLength' => 500],
+        ]],
+        ...($existing ? [$existing] : []),
+    ]];
 }
 
 function viewCreateSection(array $u, array $q): array
@@ -603,7 +623,7 @@ function viewCreateSection(array $u, array $q): array
     $newest = table("Newest {$sem['semester_Name']} sections", 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ' FROM Course_Section cs ' . SECTION_JOINS . '
       WHERE cs.semester_ID = ? ORDER BY cs.CRN DESC LIMIT 5', [$sem['semester_ID']]);
     if (!adminCanUpdate((int) $u['id'])) {
-        return ['title' => 'Create a course section', 'subtitle' => 'Section creation requires Read-Write access.', 'blocks' => [$newest]];
+        return ['title' => 'Create a course section', 'subtitle' => READ_ONLY_NOTICE, 'blocks' => [$newest]];
     }
     $courses = rows('SELECT course_ID, course_Name, course_Type, course_Credits, dept_ID FROM Course ORDER BY course_ID');
     $courseId = is_string($q['course_ID'] ?? null) ? $q['course_ID'] : '';
@@ -641,7 +661,8 @@ function viewCreateSection(array $u, array $q): array
                 'options' => array_merge([['', 'Choose a course']], array_map(fn ($c) => [$c['course_ID'], "{$c['course_ID']} {$c['course_Name']} ({$c['course_Type']}, {$c['course_Credits']} credits)"], $courses))],
             ['name' => 'faculty_ID', 'label' => 'Faculty', 'value' => $facultyId, 'required' => true,
                 'options' => array_merge([['', $department === null ? 'Choose a course first' : ($fac ? 'Choose faculty' : 'No faculty in this department')]], array_map(fn ($f) => [(string) $f['faculty_ID'],
-                    "{$f['name']} ({$f['faculty_Type']}, teaching {$f['teaching']} of " . TEACH_LOAD[$f['faculty_Type']] . ')'], $fac))],
+                    "{$f['name']} ({$f['faculty_Type']}, teaching {$f['teaching']} of " . TEACH_LOAD[$f['faculty_Type']]
+                    . ($f['teaching'] >= TEACH_LOAD[$f['faculty_Type']] ? ' — at limit)' : ')')], $fac))],
             ['name' => 'time_Slot_ID', 'label' => 'Time slot', 'value' => $v('time_Slot_ID', '1'),
                 'options' => array_map(fn ($t) => [(string) $t['id'], $t['label']], $slots)],
             ['name' => 'room_ID', 'label' => 'Room', 'value' => $v('room_ID', $rooms[0]['room_ID'] ?? ''),
@@ -1079,6 +1100,9 @@ function viewInbox(array $u, array $q): array
 // Admin: send a user a password-reset email (A-R6). The admin never sees or sets the new password.
 function viewResetPassword(array $u, array $q): array
 {
+    if (!adminCanUpdate((int) $u['id'])) {
+        return ['title' => 'Reset a password', 'subtitle' => READ_ONLY_NOTICE, 'blocks' => [recentResetsTable()]];
+    }
     if (!function_exists('demoRecoveryEnabled') || !demoRecoveryEnabled()) {
         return ['title' => 'Reset a password', 'blocks' => passwordChangeBlocks((int) $u['id'])];
     }
@@ -1089,14 +1113,19 @@ function viewResetPassword(array $u, array $q): array
         ['type' => 'form', 'title' => 'Send a password reset', 'endpoint' => 'send-password-reset', 'submit' => 'Create local demo reset', 'fields' => [
             ['name' => 'login', 'label' => 'User email or ID', 'value' => '', 'placeholder' => 'student@campus.edu or 100001'],
         ], 'note' => 'The code and link work for 15 minutes. The reset is recorded in the audit log.'],
-        table('Recent password resets', "SELECT CONCAT(u.first_Name, ' ', u.last_Name, ' (', r.user_ID, ')') AS User,
-            CASE r.purpose WHEN 'Forgot' THEN 'Forgot password' WHEN 'Change' THEN 'Changed own password' ELSE 'Sent by admin' END AS Reason,
-            COALESCE(CONCAT(au.first_Name, ' ', au.last_Name), '—') AS `Sent by`,
-            DATE_FORMAT(r.created_At, '%b %e, %Y %l:%i %p') AS Sent,
-            CASE WHEN r.used_At IS NOT NULL THEN 'Password changed' WHEN r.expires_At <= NOW() THEN 'Expired' ELSE 'Waiting for the user' END AS Status
-          FROM Password_Reset r JOIN User u ON u.user_ID = r.user_ID LEFT JOIN User au ON au.user_ID = r.requested_By
-          ORDER BY r.reset_ID DESC LIMIT 15"),
+        recentResetsTable(),
     ]];
+}
+
+function recentResetsTable(): array
+{
+    return table('Recent password resets', "SELECT CONCAT(u.first_Name, ' ', u.last_Name, ' (', r.user_ID, ')') AS User,
+        CASE r.purpose WHEN 'Forgot' THEN 'Forgot password' WHEN 'Change' THEN 'Changed own password' ELSE 'Sent by admin' END AS Reason,
+        COALESCE(CONCAT(au.first_Name, ' ', au.last_Name), '—') AS `Sent by`,
+        DATE_FORMAT(r.created_At, '%b %e, %Y %l:%i %p') AS Sent,
+        CASE WHEN r.used_At IS NOT NULL THEN 'Password changed' WHEN r.expires_At <= NOW() THEN 'Expired' ELSE 'Waiting for the user' END AS Status
+      FROM Password_Reset r JOIN User u ON u.user_ID = r.user_ID LEFT JOIN User au ON au.user_ID = r.requested_By
+      ORDER BY r.reset_ID DESC LIMIT 15");
 }
 
 // Create a user (A-R5). The fields depend on the type of user, so choosing a type reloads the form.
@@ -1128,7 +1157,8 @@ function viewCreateUser(array $u, array $q): array
         $fields[] = ['name' => 'rank', 'label' => 'Rank', 'value' => 'Assistant Professor', 'options' => array_map(fn ($r) => [$r, $r], FACULTY_RANKS)];
         $fields[] = ['name' => 'specialty', 'label' => 'Specialty (optional)', 'value' => ''];
     } elseif ($role === 'Admin') {
-        $fields[] = ['name' => 'security_Level', 'label' => 'Security level', 'value' => 'Read-Only', 'options' => [['Read-Only', 'Read-Only'], ['Read-Write', 'Read-Write']]];
+        $fields[] = ['name' => 'security_Level', 'label' => 'Security level', 'value' => 'Read-Only',
+            'options' => [['Read-Only', 'Read-Only (view only)'], ['Read-Write', 'Read-Write (view and update)']]];
     }
     array_push($fields,
         ['name' => 'street', 'label' => 'Street (optional)', 'value' => ''],
@@ -1137,16 +1167,16 @@ function viewCreateUser(array $u, array $q): array
         ['name' => 'zip_Code', 'label' => 'ZIP code (optional)', 'value' => ''],
         ['name' => 'password', 'label' => 'Starting password', 'type' => 'password', 'value' => ''],
         ['name' => 'confirm', 'label' => 'Confirm password', 'type' => 'password', 'value' => '']);
-    return ['title' => 'Create a user', 'subtitle' => $level === 'Read-Write'
-            ? 'The new user gets an ID and a campus email to sign in with.'
-            : 'You are a Read-Only admin, so creating a user will be refused.', 'blocks' => [
-        ['type' => 'form', 'title' => 'New user', 'endpoint' => 'create-user', 'submit' => 'Create user', 'fields' => $fields,
-            'note' => 'The password needs at least 8 characters, with a letter and a number.'],
-        table('Accounts created by admins', "SELECT l.user_ID AS ID, CONCAT(uu.first_Name, ' ', uu.last_Name) AS Name,
+    $created = table('Accounts created by admins', "SELECT l.user_ID AS ID, CONCAT(uu.first_Name, ' ', uu.last_Name) AS Name,
             IF(uu.user_Type = 'StatDept', 'Stat-Dept', uu.user_Type) AS Type,
             lg.user_Email AS Email, CONCAT(au.first_Name, ' ', au.last_Name) AS `Created by`, DATE_FORMAT(l.date_Time, '%b %e, %Y %l:%i %p') AS `Created on`
           FROM Audit_Log l JOIN User uu ON uu.user_ID = l.user_ID JOIN User au ON au.user_ID = l.admin_ID JOIN Login lg ON lg.user_ID = l.user_ID
-          WHERE l.action_Type = 'Create' ORDER BY l.date_Time DESC, l.log_ID DESC LIMIT 10"),
+          WHERE l.action_Type = 'Create' ORDER BY l.date_Time DESC, l.log_ID DESC LIMIT 10");
+    if ($level !== 'Read-Write') return ['title' => 'Create a user', 'subtitle' => READ_ONLY_NOTICE, 'blocks' => [$created]];
+    return ['title' => 'Create a user', 'subtitle' => 'The new user gets an ID and a campus email to sign in with.', 'blocks' => [
+        ['type' => 'form', 'title' => 'New user', 'endpoint' => 'create-user', 'submit' => 'Create user', 'fields' => $fields,
+            'note' => 'The password needs at least 8 characters, with a letter and a number.'],
+        $created,
     ]];
 }
 

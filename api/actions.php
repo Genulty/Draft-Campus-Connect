@@ -222,7 +222,8 @@ function createCourse(int $adminId, array $form): array
     $type = $field('course_Type');
     $credits = $form['course_Credits'] ?? null;
 
-    if (!preg_match('/\A[A-Z0-9]{1,10}\z/', $id)) fail('Enter a course ID of 1 to 10 letters or numbers.');
+    // A course ID is its department code and a 3-digit number, e.g. CHEM350 (undergraduate 100-499, graduate 500-699).
+    if (!preg_match('/\A([A-Z]{2,4})(\d{3})\z/', $id, $idParts)) fail('Enter a course ID made of the department code and a 3-digit number, for example CHEM350.');
     if ($name === '' || preg_match('/\A.{1,100}\z/us', $name) !== 1) fail('Enter a course title of 1 to 100 characters.');
     if (preg_match('/\A.{0,500}\z/us', $description) !== 1) fail('Use at most 500 characters for the description.');
     if (!in_array($type, ['Undergraduate', 'Graduate'], true)) fail('Choose a course type.');
@@ -230,6 +231,12 @@ function createCourse(int $adminId, array $form): array
         fail('Credits must be a whole number from 1 to 6.');
     }
     if (!one('SELECT dept_ID FROM Department WHERE dept_ID = ?', [$department])) fail('Choose a department.');
+    if ($idParts[1] !== $department) fail("A $department course ID must start with $department, for example {$department}350.");
+    $number = (int) $idParts[2];
+    if ($type === 'Undergraduate' && ($number < 100 || $number > 499)) fail('Undergraduate course numbers run from 100 to 499.');
+    if ($type === 'Graduate' && ($number < 500 || $number > 699)) fail('Graduate course numbers run from 500 to 699.');
+    $sameTitle = rows('SELECT c.course_ID FROM Course c WHERE c.dept_ID = ? AND LOWER(c.course_Name) = LOWER(?) LIMIT 1', [$department, $name]);
+    if ($sameTitle) fail("$department already has a course called \"$name\" ({$sameTitle[0]['course_ID']}).");
 
     try {
         run('INSERT INTO Course (course_ID, course_Name, dept_ID, course_Credits, course_Desc, course_Type) VALUES (?, ?, ?, ?, ?, ?)',
