@@ -37,16 +37,18 @@ function one(string $sql, array $params = []): ?array
 {
     $GLOBALS['queries'][] = [$sql,$params];
     if (str_starts_with($sql, 'SELECT student_ID FROM Student')) return in_array($params[0], [1,2], true) ? ['student_ID'=>$params[0]] : null;
+    if (str_starts_with($sql, 'SELECT COUNT(*) AS n FROM (')) return ['n'=>0];
     if (str_starts_with($sql, 'SELECT cs.*') || str_starts_with($sql, 'SELECT e.grade')) return selectFixture($sql, $params)[0] ?? null;
-    if (str_contains($sql, 'COALESCE(ug.dept_ID')) return ['dept'=>'TEST','load_type'=>'Full-time','student_Type'=>'Undergraduate'];
+    if (str_contains($sql, 'COALESCE(ug.undergraduate_Student_Type')) return ['dept'=>'TEST','load_type'=>'Full-time','student_Type'=>'Undergraduate'];
     if (str_contains($sql, 'SELECT s.student_Type')) return ['student_Type'=>'Undergraduate','student_Year'=>'Senior','load_type'=>'Full-time'];
     if (str_contains($sql, 'GROUP_CONCAT(h.hold_Type')) return ['list'=>null];
-    if (str_contains($sql, 'SUM(c.course_Credits)')) return ['n'=>0];
+    if (str_contains($sql, 'SUM(c.course_Credits)')) return selectFixture($sql, $params)[0];
     if (str_contains($sql, 'FROM Enrollment e') || str_contains($sql, 'FROM Student_History h') || str_contains($sql, 'FROM Course_Section_Lab')) return null;
     throw new RuntimeException('Unexpected one(): ' . $sql);
 }
 function rows(string $sql, array $params = []): array
 {
+    if (str_contains($sql, 'FROM Gen_Ed_Requirement r')) return [];
     if (str_contains($sql, 'FROM Semester')) return selectFixture($sql, $params);
     if (str_contains($sql, 'FROM Department')) return [['dept_ID'=>'TEST','dept_Name'=>'Fixture department'], ['dept_ID'=>'OTHER','dept_Name'=>'Other fixture']];
     if (str_contains($sql, 'FROM Student_Hold') || str_contains($sql, 'FROM Course_Prerequisite')) return [];
@@ -61,10 +63,15 @@ function run(string $sql, array $params = []): object
     }
     check(str_starts_with($sql, 'SELECT '), 'Unexpected statement');
     $columns = ['CRN','Course','Title','Section'];
-    $semId = $params[str_contains($sql, 'FROM Enrollment e') ? 1 : 0];
-    $stmt = $GLOBALS['memory']->prepare('SELECT CRN FROM Course_Section WHERE semester_ID = ?');
-    $stmt->execute([$semId]); $crn = (int) $stmt->fetchColumn();
-    $list = str_contains($sql, 'FROM Enrollment e') && $params[0] !== 1 ? [] : [[$crn,'TEST100','Isolated test course','001']];
+    if (str_contains($sql, 'FROM Enrollment e')) {
+        $list = array_map('array_values', selectFixture("SELECT cs.CRN, c.course_ID, c.course_Name, '001'
+          FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN JOIN Course c ON c.course_ID = cs.course_ID
+          WHERE e.student_ID = ? AND cs.semester_ID = ? ORDER BY cs.CRN", $params));
+    } else {
+        $GLOBALS['queries'][] = [$sql, $params];
+        $crn = (int) selectFixture('SELECT CRN FROM Course_Section WHERE semester_ID = ? ORDER BY CRN LIMIT 1', [$params[0]])[0]['CRN'];
+        $list = [[$crn,'TEST100','Isolated test course','001']];
+    }
     return new class($columns, $list) {
         public function __construct(private array $columns, private array $list) {}
         public function columnCount(): int { return count($this->columns); }
@@ -120,6 +127,8 @@ foreach ($fixture as $i => $sem) {
 $memory->exec("UPDATE Semester SET drop_Start='2027-01-01' WHERE semester_ID='SP27'");
 $clock='2026-12-01';
 $addOnly=viewRegister($user,['semester'=>'SP27']);
+check($addOnly['blocks'][0]['filters'][1]['value']===''
+    && $addOnly['blocks'][0]['filters'][1]['options'][0]===['', 'All Departments'], 'Registration must default to all departments');
 check($addOnly['blocks'][2]['action']['disabled'] === true && $addOnly['blocks'][3]['action']['disabled'] === false, 'Add-only controls incorrect');
 expectAction('addSection',2,90006,true); expectAction('dropSection',1,90006,false);
 $memory->exec("UPDATE Semester SET drop_Start='2026-10-01' WHERE semester_ID='SP27'");
@@ -143,6 +152,36 @@ foreach ([null,'',0,-1,[],true,90006.0,'90006junk','9e4','90006.0',' 90006','999
 check(registrationCrn('90006')===90006 && registrationCrn(90006)===90006,'Valid CRN rejected');
 $clock='2027-02-02'; expectAction('dropSection',2,90006,false,'You are not registered'); // No registration for another student.
 expectAction('addSection',2,99999,false,'That course section does not exist'); expectAction('dropSection',1,99999,false,'You are not registered');
-if (($argv[1] ?? '')==='--pages') { echo json_encode($pages,JSON_THROW_ON_ERROR); exit; }
+// Exercise load guidance and bindings using only generic SQLite fixture sections.
+$clock = '2027-01-15';
+$progress = [];
+foreach ([91001, 91002, 91003] as $i => $crn) {
+    $code = 'LOAD' . ($i + 100);
+    $memory->prepare("INSERT INTO Course VALUES (?, ?, 4, 'Undergraduate')")->execute([$code, 'Load test course']);
+    $memory->prepare("INSERT INTO Course_Section VALUES (?, ?, 'SP27', 1, 10, 10)")->execute([$crn, $code]);
+    $memory->prepare('INSERT INTO Enrollment VALUES (2, ?, NULL)')->execute([$crn]);
+    if ($i === 0) continue;
+    $total = ($i + 1) * 4;
+    $expected = $total === 8 ? '4 more credits to reach a full-time load.' : 'Full-time target met.';
+    $base = viewRegister(['id'=>2,'role'=>'Student'], ['semester'=>'SP27']);
+    check($base['blocks'][1]['items'][0]['value'] === "$total of 16", 'Wrong semester credits');
+    check($base['blocks'][1]['items'][1]['value'] === $expected, 'Wrong full-time guidance');
+    check($base['blocks'][1]['items'][2]['value'] === 'Full-time', 'Recorded status changed');
+    check(count($base['blocks'][2]['rows']) === $i + 1, 'Unexpected registered sections');
+    foreach (['', 'TEST', 'OTHER'] as $dept) {
+        $queries = [];
+        $page = viewRegister(['id'=>2,'role'=>'Student'], ['semester'=>'SP27','dept'=>$dept]);
+        $offering = array_values(array_filter($queries, fn ($query) => str_contains($query[0], 'AS Prerequisites')));
+        check(count($offering) === 1, 'Expected one department-scoped offering query');
+        [$offeringQuery, $bindings] = $offering[0];
+        check(str_contains($offeringQuery, 'AND c.dept_ID = ?') === ($dept !== ''), 'Department filter applies to the wrong query');
+        check($bindings === ($dept === '' ? ['SP27','Undergraduate',2] : ['SP27','Undergraduate',$dept,2]), 'Incorrect offering bindings');
+        check($page['blocks'][1] === $base['blocks'][1] && $page['blocks'][2] === $base['blocks'][2], 'Filter changed credits or registration');
+        $progress[$total][$dept] = $page;
+    }
+}
+if (($argv[1] ?? '')==='--pages') { echo json_encode($pages + ['progress'=>$progress],JSON_THROW_ON_ERROR); exit; }
+echo "PASS: All Departments default, filter-only offering bindings, unchanged registrations, and full-time guidance at 8 and 12 credits.
+";
 echo "PASS: $cases stored-date boundary scenarios across six semesters, students with/without registrations, isolated add-only state, independent action guards, malformed CRNs, role restrictions, and safe filter selection.\n";
 echo "No MySQL connection: all fixtures are SQLite :memory:, enrollment writes stopped before execution. Existing prerequisite/seat/conflict rules remain unchanged; their live behavior is not simulated by these stubs.\n";

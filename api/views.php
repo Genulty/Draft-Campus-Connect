@@ -272,10 +272,58 @@ function viewHoldsAdvisors(array $u, array $q): array
     ]];
 }
 
+// Use earlier registered or transcript terms as evidence of progression. A class standing
+// or a requirement's position in the catalog does not establish a term-by-term plan.
+function registrationPlanning(int $studentId, array $semester): ?array
+{
+    $terms = (int) one('SELECT COUNT(*) AS n FROM (
+        SELECT h.semester_ID FROM Student_History h WHERE h.student_ID = ?
+        UNION
+        SELECT cs.semester_ID FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN WHERE e.student_ID = ?
+      ) attended JOIN Semester earlier USING (semester_ID) WHERE earlier.start_Date < ?',
+        [$studentId, $studentId, $semester['start_Date']])['n'];
+    if ($terms > 1) return null;
+
+    // Recommend open requirements only. A same-term registration can cover a category
+    // for planning purposes, but only transcript grades satisfy completion.
+    try {
+        $mappings = rows("SELECT o.course_ID, r.requirement_Name
+          FROM Gen_Ed_Requirement r JOIN Gen_Ed_Requirement_Course o USING (requirement_ID)
+          WHERE NOT EXISTS (
+            SELECT 1 FROM Gen_Ed_Requirement_Course pick
+            JOIN Student_History h ON h.course_ID = pick.course_ID
+            JOIN Course_Section cs ON cs.CRN = h.CRN AND cs.course_ID = h.course_ID AND cs.semester_ID = h.semester_ID
+            JOIN Semester taken ON taken.semester_ID = h.semester_ID
+            WHERE pick.requirement_ID = r.requirement_ID AND h.student_ID = ? AND taken.start_Date <= ?
+              AND FIELD(pick.min_Grade_Req, " . GRADE_ORDER . ") > 0 AND h.grade <> 'F'
+              AND FIELD(h.grade, " . GRADE_ORDER . ") >= FIELD(pick.min_Grade_Req, " . GRADE_ORDER . ")
+          ) AND NOT EXISTS (
+            SELECT 1 FROM Gen_Ed_Requirement_Course pick
+            JOIN Course_Section cs ON cs.course_ID = pick.course_ID
+            JOIN Enrollment e ON e.CRN = cs.CRN
+            WHERE pick.requirement_ID = r.requirement_ID AND e.student_ID = ?
+              AND cs.semester_ID = ? AND e.grade IS NULL
+          )
+          ORDER BY CASE r.requirement_ID WHEN 'WRITING' THEN 0 WHEN 'MATH' THEN 1 ELSE 2 END,
+            r.requirement_Name, o.course_ID",
+            [$studentId, $semester['start_Date'], $studentId, $semester['semester_ID']]);
+    } catch (PDOException $error) {
+        // Installations without the Gen Ed migration can still browse and register.
+        if ($error->getCode() !== '42S02') throw $error;
+        return null;
+    }
+
+    $suggestions = [];
+    foreach ($mappings as $mapping) {
+        $suggestions[$mapping['course_ID']] ??= ['order' => count($suggestions), 'name' => $mapping['requirement_Name']];
+    }
+    return ['suggestions' => $suggestions, 'prior_terms' => $terms];
+}
+
 // Registration (S-R22, S-R23): a semester is accessible while either window is open.
 function viewRegister(array $u, array $q): array
 {
-    $open = rows('SELECT semester_ID, semester_Name, add_Start, add_End, drop_Start, drop_End,
+    $open = rows('SELECT semester_ID, semester_Name, start_Date, add_Start, add_End, drop_Start, drop_End,
         CURDATE() BETWEEN add_Start AND add_End AS add_open,
         CURDATE() BETWEEN drop_Start AND drop_End AS drop_open FROM Semester
       WHERE (CURDATE() BETWEEN add_Start AND add_End)
@@ -288,10 +336,11 @@ function viewRegister(array $u, array $q): array
     $status = !$addOpen ? 'Registration closed — drops still permitted.'
         : ($dropOpen ? 'Adding and dropping are permitted.' : 'Adding permitted — drop period closed.');
     $depts = departments();
-    $me = one('SELECT COALESCE(ug.dept_ID, g.dept_ID) AS dept, COALESCE(ug.undergraduate_Student_Type, g.graduate_Student_Type) AS load_type,
+    $me = one('SELECT COALESCE(ug.undergraduate_Student_Type, g.graduate_Student_Type) AS load_type,
         s.student_Type FROM Student s LEFT JOIN Undergraduate_Student ug ON ug.student_ID = s.student_ID
         LEFT JOIN Graduate_Student g ON g.student_ID = s.student_ID WHERE s.student_ID = ?', [$u['id']]);
-    $deptId = in_array($q['dept'] ?? null, array_column($depts, 'dept_ID'), true) ? $q['dept'] : $me['dept'];
+    $deptId = in_array($q['dept'] ?? null, array_column($depts, 'dept_ID'), true) ? $q['dept'] : '';
+    $load = $me['load_type'];
     $credits = one('SELECT COALESCE(SUM(c.course_Credits), 0) AS n FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN
       JOIN Course c ON c.course_ID = cs.course_ID WHERE e.student_ID = ? AND cs.semester_ID = ?', [$u['id'], $sem['semester_ID']]);
     $holds = one("SELECT GROUP_CONCAT(h.hold_Type SEPARATOR ', ') AS list FROM Student_Hold sh JOIN Hold h ON h.hold_ID = sh.hold_ID
@@ -300,15 +349,16 @@ function viewRegister(array $u, array $q): array
     $mine = studentSchedule("My {$sem['semester_Name']} registration", $u['id'], $sem['semester_ID']);
     $mine['action'] = ['label' => 'Drop', 'endpoint' => 'drop-section', 'column' => 'CRN', 'style' => 'danger', 'disabled' => !$dropOpen];
     if (!$dropOpen) $mine['note'] = 'The drop period is closed. Existing registrations cannot be dropped.';
-    $offered = table('Sections you can add', 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ', ' . SEATS . ",
+    $offered = table('Sections you can add', 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ', ' . LAB_COLUMNS . ', ' . SEATS . ",
         COALESCE((SELECT GROUP_CONCAT(cp.prerequisite_Course_ID SEPARATOR ', ') FROM Course_Prerequisite cp WHERE cp.course_ID = c.course_ID), '—') AS Prerequisites
-      FROM Course_Section cs " . SECTION_JOINS . '
-      WHERE cs.semester_ID = ? AND c.dept_ID = ? AND c.course_Type = ?
+      FROM Course_Section cs " . SECTION_JOINS . ' ' . LAB_JOINS . '
+      WHERE cs.semester_ID = ? AND c.course_Type = ?' . ($deptId === '' ? '' : ' AND c.dept_ID = ?') . '
         AND cs.CRN NOT IN (SELECT CRN FROM Enrollment WHERE student_ID = ?)
-      ORDER BY cs.course_ID, cs.section_No', [$sem['semester_ID'], $deptId, $me['student_Type'], $u['id']],
-        'These sections pass every registration rule for you: holds, prerequisites, seats, credit limit, time conflicts and courses already passed.');
+      ORDER BY cs.course_ID, cs.section_No',
+        [$sem['semester_ID'], $me['student_Type'], ...($deptId === '' ? [] : [$deptId]), $u['id']],
+        'These sections are eligible for your current schedule. Each add rechecks eligibility.');
 
-    // Split the department's sections with the same rule check the Add button runs.
+    // The filter affects candidates only. Validation always sees the full semester schedule.
     $crnAt = array_search('CRN', $offered['columns'], true);
     $keep = array_map(fn ($c) => array_search($c, $offered['columns'], true), ['CRN', 'Course', 'Title', 'Section']);
     $canAdd = [];
@@ -318,6 +368,23 @@ function viewRegister(array $u, array $q): array
         if ($reason === null) $canAdd[] = $row;
         else $cannot[] = [...array_map(fn ($k) => $row[$k], $keep), $reason];
     }
+    $planning = $addOpen && $me['student_Type'] === 'Undergraduate' ? registrationPlanning($u['id'], $sem) : null;
+    if ($planning !== null && $canAdd) {
+        $courseAt = array_search('Course', $offered['columns'], true);
+        $suggestions = $planning['suggestions'];
+        $rank = static fn ($row) => $suggestions[$row[$courseAt]]['order'] ?? PHP_INT_MAX;
+        usort($canAdd, static fn ($a, $b) => $rank($a) <=> $rank($b));
+        if ($rank($canAdd[0]) !== PHP_INT_MAX) {
+            $term = $planning['prior_terms'] ? 'Second-term' : 'First-term';
+            $offered['note'] .= " $term suggestions appear first, based on Gen Ed mappings (draft).";
+            $offered['columns'][] = 'Planning suggestion';
+            foreach ($canAdd as &$row) $row[] = $suggestions[$row[$courseAt]]['name'] ?? null;
+            unset($row);
+        }
+        $offered['note'] .= ' Check with your advisor for a term-by-term major plan.';
+    } elseif (!$canAdd && $addOpen && $deptId !== '') {
+        $offered['note'] = 'No eligible sections in this department. Choose All Departments to look for other options.';
+    }
     $available = array_merge($offered, ['rows' => $canAdd, 'action' => ['label' => 'Add', 'endpoint' => 'add-section', 'column' => 'CRN', 'disabled' => !$addOpen]]);
     $blocked = ['type' => 'table', 'title' => "Sections you can't add",
         'note' => $addOpen ? 'Each one breaks a registration rule. Try sends the request anyway, so you can see it refused.'
@@ -325,14 +392,23 @@ function viewRegister(array $u, array $q): array
         'columns' => [...array_map(fn ($k) => $offered['columns'][$k], $keep), 'Reason'], 'rows' => $cannot,
         'action' => ['label' => 'Try', 'endpoint' => 'add-section', 'column' => 'CRN', 'style' => 'secondary', 'disabled' => !$addOpen]];
 
+    $registered = (int) $credits['n'];
+    $loadStats = [['Registered credits', "$registered of " . (MAX_CREDITS[$load] ?? '—')]];
+    if ($me['student_Type'] === 'Undergraduate' && $load === 'Full-time') {
+        $remaining = 12 - $registered;
+        $loadStats[] = ['Full-time target (12 credits)', $remaining <= 0 ? 'Full-time target met.'
+            : $remaining . ($remaining === 1 ? ' more credit' : ' more credits') . ' to reach a full-time load.'];
+    }
+    $loadStats[] = ['Recorded enrollment status', $load];
+
     return ['title' => "Register for {$sem['semester_Name']}", 'subtitle' => $status, 'blocks' => [
         ['type' => 'filters', 'filters' => [
             ['name' => 'semester', 'label' => 'Semester', 'value' => $sem['semester_ID'],
                 'options' => array_map(fn ($x) => [$x['semester_ID'], $x['semester_Name']], $open)],
             ['name' => 'dept', 'label' => 'Department', 'value' => $deptId,
-                'options' => array_map(fn ($d) => [$d['dept_ID'], $d['dept_Name']], $depts)],
+                'options' => [['', 'All Departments'], ...array_map(fn ($d) => [$d['dept_ID'], $d['dept_Name']], $depts)]],
         ]],
-        stats([['Registered credits', "{$credits['n']} of " . ($me['load_type'] === 'Full-time' ? 16 : 8)], ['Active holds', $holds['list'] ?: 'None'],
+        stats([...$loadStats, ['Active holds', $holds['list'] ?: 'None'],
             ['Add period', shortDate($sem['add_Start']) . ' – ' . shortDate($sem['add_End'])],
             ['Drop period', shortDate($sem['drop_Start']) . ' – ' . shortDate($sem['drop_End'])]]),
         $mine,
