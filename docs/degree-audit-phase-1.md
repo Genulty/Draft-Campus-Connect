@@ -160,14 +160,32 @@ credit target is allocated as a whole. Sharing requires permission from both
 the new block and any earlier supplemental or elective allocation. Course
 ordering and whole-course allocation are provisional policy choices.
 
-For a local demo only, apply the supplemental and elective migrations, then
-source `tests/fixtures/degree-audit-demo-rules.sql`. The fixture is optional,
-draft-labeled, and preserves any existing rule configuration for BS-CS. It adds
-no transcript, enrollment, or placement results. Its proposed courses, grade
-minimums, placement thresholds, elective targets, and sharing permissions
-require approval. The draft Major Electives examples use CS445, CS450, and CS455
-with explicit overlap permission so the demo works with the existing local
-catalog. Their inclusion and sharing permission require separate approval.
+### Schema and local demo data are separate
+
+Apply the degree-credit migration first, then the Diversity/Proficiency and
+elective migrations. The degree-credit migration includes the existing draft
+BS-CS total and Liberal Arts policy. The two supplemental migrations create
+tables only. Without program rule rows and eligible mappings or placement
+criteria, the affected sections show **Rules unavailable**.
+
+For an isolated local demo, optionally load
+`tests/fixtures/degree-audit-demo-rules.sql` after those migrations. The fixture
+adds no transcript, enrollment, or placement results and preserves existing
+BS-CS rule configuration. Use a clean disposable database to test the revised
+fixture if an earlier demo fixture is present. Keep the demo fixture out of
+hosted and shared databases.
+
+The revised fixture leaves Diversity unconfigured and Major Electives without
+eligible mappings. Required courses for the primary major are excluded from
+Major Electives even if an older mapping permits sharing. The fixture continues
+to provide draft Mathematics and Writing pathways and a draft Free Electives
+list. An eligible course above the Free Electives target appears separately.
+Courses already allocated elsewhere show their exclusion reason when sharing is
+disabled. Only applied coursework contributes to the Free Electives target.
+
+Approval is still needed for the Diversity mappings, eligible courses outside
+the CS major requirements, elective targets and allocation rules, coursework
+grade minimums, and the placement assessments, thresholds and retest rules.
 
 ## Run the regression check
 

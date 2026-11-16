@@ -339,11 +339,12 @@ function renderDegreeAudit(audit) {
     return table;
   };
   const requirementOptions = (requirement, chooseOne = true) => {
-    if (requirement.status === 'Completed' || !requirement.options.length) return null;
+    const choices = requirement.options.length + Number(Boolean(requirement.placement_configured));
+    if (requirement.status === 'Completed' || !choices) return null;
 
     const needed = el('div', 'audit-rule-needed');
     needed.append(el('strong', null, 'Still needed'));
-    if (chooseOne && requirement.options.length > 1) needed.append(el('span', 'audit-rule-meta', ' · Choose one'));
+    if (chooseOne && choices > 1) needed.append(el('span', 'audit-rule-meta', ' · Choose one'));
     const options = el('ul', 'audit-rule-options');
     for (const option of requirement.options) {
       const choice = el('li');
@@ -355,6 +356,10 @@ function renderDegreeAudit(audit) {
         choice.append(el('p', 'audit-rule-meta', option.detail));
       }
       options.append(choice);
+    }
+    if (requirement.placement_configured) {
+      const label = requirement.id === 'MATH' ? 'Math placement' : 'Writing placement';
+      options.append(el('li', null, `Qualify through ${label}.`));
     }
     needed.append(options);
     return needed;
@@ -429,7 +434,11 @@ function renderDegreeAudit(audit) {
   if (degree) {
     const group = section('Degree Requirements');
     const status = auditStatus(degree.status);
-    const program = degree.program === 'B.S. in Computer Science' ? 'Degree in Bachelor Of Science' : degree.program;
+    const degreeNames = { 'B.S.': 'Bachelor of Science', 'B.A.': 'Bachelor of Arts',
+      'M.S.': 'Master of Science', 'M.A.': 'Master of Arts' };
+    const primaryMajor = majors.find(major => Number(major.is_primary));
+    const program = (primaryMajor?.name ?? degree.program)?.replace(/^(B\.S\.|B\.A\.|M\.S\.|M\.A\.) /,
+      (_, degreeName) => `${degreeNames[degreeName]} `);
     const panel = auditAccordion(program ?? 'Primary degree program unavailable', status);
     panel.querySelector('summary').classList.add('audit-credit-heading');
     const values = el('span', 'audit-credit-values');
@@ -454,7 +463,10 @@ function renderDegreeAudit(audit) {
     const checklist = el('ul', 'audit-credit-checklist');
     for (const requirement of degree.checklist) {
       const item = el('li');
-      item.append(el('span', null, requirement.name), auditStatus(requirement.status));
+      const name = el('span');
+      name.append(el('span', null, requirement.name));
+      if (requirement.draft) name.append(el('span', 'audit-rule-meta', ' · Draft rule'));
+      item.append(name, auditStatus(requirement.status));
       checklist.append(item);
     }
     panel.append(checklist);
@@ -545,11 +557,13 @@ function renderDegreeAudit(audit) {
         const status = el('td');
         status.append(auditStatus(rule.status));
         const options = requirementOptions(rule);
-        const text = rule.status === 'In progress' ? 'Coursework in progress'
-          : rule.status === 'Not completed' && !options && !rule.detail.startsWith('Still needed') ? `Still needed · ${rule.detail}` : rule.detail;
+        const text = rule.status === 'In progress' ? 'Coursework in progress' : rule.detail;
         const details = el('td');
-        details.append(el('div', null, text));
-        if (options) details.firstChild.append(options);
+        const content = el('div');
+        content.append(el('div', null, text));
+        if (rule.course) content.append(el('div', 'audit-rule-meta', `${rule.course.code} · ${rule.course.title}`));
+        if (options) content.append(options);
+        details.append(content);
         return [name, status, details];
       });
       const table = responsiveAuditTable('Proficiency requirements', ['Requirement', 'Status', 'Details'], rows);
@@ -566,18 +580,30 @@ function renderDegreeAudit(audit) {
     if (!electives) continue;
     const group = section(title);
     const panel = auditAccordion(`${title === 'Major Electives' ? 'Major' : 'Free'} Elective Courses`, auditStatus(electives.status));
+    const draft = electives.draft ? 'Harvest Hill draft rule. ' : '';
     if (!electives.configured) {
-      panel.append(el('p', 'audit-program-note audit-credit-note', 'No elective target and course list are configured for this program.'));
+      panel.append(el('p', 'audit-program-note audit-credit-note',
+        draft + (electives.detail ?? 'No elective target and course list are configured for this program.')));
     } else {
       const unit = electives.unit === 'COURSES' ? 'courses' : 'credits';
-      const draft = electives.draft ? 'Harvest Hill draft rule. ' : '';
       panel.append(el('p', 'audit-program-note audit-credit-note',
-        `${draft}${electives.applied} of ${electives.target} ${unit} applied · ${electives.in_progress_credits} credits in progress`));
+        `${draft}${electives.applied} of ${electives.target} ${unit} applied · ${electives.in_progress} ${unit} in progress`));
       if (electives.courses.length) panel.append(auditCourseTable(`${title} coursework`, electives.courses));
-      const options = requirementOptions(electives, electives.unit === 'COURSES' && electives.target - electives.applied === 1);
+      const options = requirementOptions(electives, electives.choose_one);
       if (options) {
         options.classList.add('audit-program-note', 'audit-credit-note');
         panel.append(options);
+      }
+      if (title === 'Free Electives' && electives.eligible_not_applied.length) {
+        panel.append(el('p', 'audit-program-note audit-credit-note', 'Eligible but not applied'));
+        panel.append(auditCourseTable('Eligible Free Electives not applied', electives.eligible_not_applied));
+      }
+      if (title === 'Free Electives' && electives.excluded.length) {
+        const excluded = el('ul', 'audit-program-note audit-rule-options');
+        for (const option of electives.excluded) {
+          excluded.append(el('li', null, `${option.code} · ${option.title} — ${option.detail}`));
+        }
+        panel.append(el('p', 'audit-program-note audit-credit-note', 'Excluded courses'), excluded);
       }
     }
     group.append(panel);
