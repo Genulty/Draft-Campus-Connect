@@ -217,8 +217,7 @@ function renderStudentOverview(overview, viewId) {
         for (const meeting of meetings) {
           const item = el('li', 'overview-meeting');
           item.append(el('span', 'overview-meeting-time', meeting.time),
-            el('strong', null, meeting.course.code),
-            el('span', null, meeting.course.title),
+            el('strong', null, meeting.course.title),
             el('span', 'overview-note', meeting.room ?? 'Room unavailable'),
             el('span', 'overview-meeting-kind', `${meeting.kind} · CRN ${meeting.course.crn}`));
           list.append(item);
@@ -250,10 +249,10 @@ function renderStudentOverview(overview, viewId) {
   const table = renderBlock({
     type: 'table',
     title: overview.semester ? `${overview.semester} schedule` : 'Semester schedule',
-    columns: ['CRN', 'Course', 'Title', 'Section', 'Credits', 'Level', 'Days', 'Instructor', 'Time', 'Room', 'Lab days', 'Lab time', 'Lab room'],
+    columns: ['CRN', 'Title', 'Section', 'Credits', 'Level', 'Days', 'Instructor', 'Time', 'Room', 'Lab days', 'Lab time', 'Lab room'],
     rows: overview.sections.map(course => {
       const [days, time, room] = meetingColumns(course, 'Lecture');
-      return [course.crn, course.code, course.title, course.section, course.credits, course.level,
+      return [course.crn, course.title, course.section, course.credits, course.level,
         days, course.instructor, time, room, ...meetingColumns(course, 'Lab')];
     }),
   }, viewId);
@@ -721,6 +720,7 @@ if (block.type === 'empty-major') {
     const grid = el('div', 'form-grid');
     for (const f of block.fields) {
       const label = el('label', null, f.label);
+      if (f.type === 'hidden') label.style.display = 'none';
       let input;
       if (f.options) {
         input = el('select');
@@ -882,7 +882,7 @@ item.append(availability);
       btn.addEventListener('click', () => {
         if (block.action.disabled) return;
         btn.disabled = true;
-        const body = { [block.action.column]: row[keyIndex], ...(block.action.extra || {}) };
+        const body = { [block.action.field || block.action.column]: row[keyIndex], ...(block.action.extra || {}) };
         if (picker) body[picker.name] = picker.value;
         runAction(block.action.endpoint, body);
       });
