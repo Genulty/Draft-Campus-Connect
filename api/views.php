@@ -493,7 +493,7 @@ function viewTeaching(array $u, array $q): array
           LEFT JOIN Attendance a ON a.CRN = e.CRN AND a.student_ID = e.student_ID AND a.attendance_Date = CURDATE()
           WHERE e.CRN = ? ORDER BY u.last_Name", [$s['CRN']],
             "Only saved for today, and only while this section is actually meeting.");
-        $attendance['action'] = ['label' => 'Save', 'endpoint' => 'record-attendance', 'column' => 'Student ID',
+        $attendance['action'] = ['label' => 'Save', 'endpoint' => 'record-attendance', 'column' => 'Student ID', 'field' => 'student_ID',
             'extra' => ['CRN' => $s['CRN']],
             'select' => ['name' => 'status', 'defaultColumn' => "Today's status",
                 'options' => [['Present', 'Present'], ['Absent', 'Absent']]]];
@@ -505,7 +505,7 @@ function viewTeaching(array $u, array $q): array
             CONCAT(u.first_Name, ' ', u.last_Name) AS Student, COALESCE(e.grade, '—') AS `Current grade`
           FROM Enrollment e JOIN User u ON u.user_ID = e.student_ID WHERE e.CRN = ? ORDER BY u.last_Name", [$s['CRN']],
             'Only saved while the grading window for this semester is open.');
-        $grading['action'] = ['label' => 'Save', 'endpoint' => 'record-grade', 'column' => 'Student ID',
+        $grading['action'] = ['label' => 'Save', 'endpoint' => 'record-grade', 'column' => 'Student ID', 'field' => 'student_ID',
             'extra' => ['CRN' => $s['CRN']],
             'select' => ['name' => 'grade', 'defaultColumn' => 'Current grade',
                 'options' => array_map(fn ($g) => [$g, $g], VALID_GRADES)]];
@@ -564,11 +564,147 @@ function viewAdminOverview(array $u, array $q): array
 
 function viewHolds(array $u, array $q): array
 {
-    return ['title' => 'Student holds', 'blocks' => [
-        table('Active holds', "SELECT sh.student_ID AS `Student ID`, CONCAT(u.first_Name, ' ', u.last_Name) AS Student,
+    $canUpdate = adminCanUpdate((int) $u['id']);
+    $holdTypes = rows('SELECT hold_Type FROM Hold ORDER BY hold_Type');
+    $place = ['type' => 'form', 'title' => 'Place a hold', 'endpoint' => 'place-hold', 'submit' => 'Place hold', 'keep' => true,
+        'note' => $canUpdate ? null : READ_ONLY_NOTICE, 'fields' => [
+        ['name' => 'student_ID', 'label' => 'Student ID', 'type' => 'number', 'required' => true, 'value' => ''],
+        ['name' => 'hold_Type', 'label' => 'Hold type', 'value' => $holdTypes[0]['hold_Type'] ?? '',
+            'options' => array_map(fn ($h) => [$h['hold_Type'], $h['hold_Type']], $holdTypes)],
+    ]];
+    $active = table('Active holds', "SELECT sh.student_ID AS `Student ID`, CONCAT(u.first_Name, ' ', u.last_Name) AS Student,
             h.hold_Type AS Hold, DATE_FORMAT(sh.hold_Date, '%b %e, %Y') AS `Placed on`
           FROM Student_Hold sh JOIN Hold h ON h.hold_ID = sh.hold_ID JOIN User u ON u.user_ID = sh.student_ID
-          ORDER BY sh.hold_Date DESC"),
+          ORDER BY sh.hold_Date DESC");
+    $active['action'] = ['label' => 'Remove', 'endpoint' => 'remove-hold', 'column' => 'Student ID', 'field' => 'student_ID', 'style' => 'danger',
+        'disabled' => !$canUpdate, 'select' => ['name' => 'hold_Type', 'defaultColumn' => 'Hold',
+            'options' => array_map(fn ($h) => [$h['hold_Type'], $h['hold_Type']], $holdTypes)]];
+    return ['title' => 'Student holds', 'subtitle' => $canUpdate ? null : READ_ONLY_NOTICE, 'blocks' => [$place, $active]];
+}
+
+// Faculty workload / department roster: every faculty member, which department(s) they belong
+// to, and how much they're teaching in the chosen semester. A read-only report; no security gate.
+function viewFacultyRoster(array $u, array $q): array
+{
+    [$semester, $deptId, $filters] = semesterFilter($q);
+    $rows = rows("SELECT f.faculty_ID AS `Faculty ID`, CONCAT(u.first_Name, ' ', u.last_Name) AS Faculty,
+        d.dept_Name AS Department, fd.percent_Time AS `% time`, f.faculty_Type AS Type, f.`rank` AS `Rank`,
+        (SELECT COUNT(*) FROM Course_Section cs WHERE cs.faculty_ID = f.faculty_ID AND cs.semester_ID = ?) AS Sections,
+        (SELECT COALESCE(SUM(c.course_Credits), 0) FROM Course_Section cs JOIN Course c ON c.course_ID = cs.course_ID
+          WHERE cs.faculty_ID = f.faculty_ID AND cs.semester_ID = ?) AS `Credit hours`,
+        (SELECT COALESCE(SUM((SELECT COUNT(*) FROM Enrollment e WHERE e.CRN = cs.CRN)), 0)
+          FROM Course_Section cs WHERE cs.faculty_ID = f.faculty_ID AND cs.semester_ID = ?) AS Students
+      FROM Faculty f JOIN User u ON u.user_ID = f.faculty_ID
+      JOIN Faculty_Department fd ON fd.faculty_ID = f.faculty_ID
+      JOIN Department d ON d.dept_ID = fd.dept_ID
+      WHERE ? = '' OR d.dept_ID = ?
+      ORDER BY d.dept_Name, u.last_Name", [$semester, $semester, $semester, $deptId, $deptId]);
+    $cur = currentSemester();
+    $sems = rows('SELECT semester_ID, semester_Name FROM Semester ORDER BY start_Date');
+    $semName = 'that semester';
+    foreach ($sems as $s) if ($s['semester_ID'] === $semester) $semName = $s['semester_Name'];
+    return ['title' => 'Faculty workload & department roster', 'subtitle' => "Sections, credit hours, and students taught in $semName.", 'blocks' => [
+        $filters,
+        ['type' => 'table', 'title' => 'Faculty', 'note' => null,
+            'columns' => $rows ? array_keys($rows[0]) : ['Faculty ID', 'Faculty', 'Department', '% time', 'Type', 'Rank', 'Sections', 'Credit hours', 'Students'],
+            'rows' => array_map('array_values', $rows)],
+    ]];
+}
+
+// Update a user's personal information upon their request -- a correction to their name, gender,
+// date of birth, or address that only an admin can make (unlike the student/faculty self-service
+// address update on the Account page). The request itself (phone call, email, in person) happens
+// outside the system; this just applies it and logs it, the same as every other admin-assisted
+// action here (e.g. registration) that has no in-system "request" record either.
+function viewUpdateUserInfo(array $u, array $q): array
+{
+    $canUpdate = adminCanUpdate((int) $u['id']);
+    $raw = $q['user'] ?? '';
+    $term = is_string($raw) ? trim($raw) : '';
+    $blocks = [[
+        'type' => 'form', 'title' => 'Find a user', 'method' => 'view', 'submit' => 'Find',
+        'fields' => [['name' => 'user', 'label' => 'User ID or campus email', 'value' => $term,
+            'placeholder' => '100001 or name@campus.edu']],
+        'note' => 'Use this to apply a change a user requested by phone, email, or in person -- e.g. a name correction, a date-of-birth fix, or an address update. Every change is recorded in the Audit Log.',
+    ]];
+    if ($term === '') return ['title' => 'Update user information', 'blocks' => $blocks];
+
+    $isId = ctype_digit($term);
+    if (!$isId && !filter_var($term, FILTER_VALIDATE_EMAIL)) {
+        $blocks[] = ['type' => 'message', 'ok' => false, 'heading' => 'Check the lookup', 'message' => 'Enter a valid user ID or campus email.'];
+        return ['title' => 'Update user information', 'blocks' => $blocks];
+    }
+    $column = $isId ? 'u.user_ID' : 'l.user_Email';
+    $existing = one("SELECT u.user_ID, u.first_Name, u.middle_Name, u.last_Name, u.gender, u.DOB,
+        u.street, u.city, u.state, u.zip_Code, u.user_Type, l.user_Email
+      FROM User u LEFT JOIN Login l ON l.user_ID = u.user_ID WHERE $column = ?", [$isId ? (int) $term : $term]);
+    if (!$existing) {
+        $blocks[] = ['type' => 'message', 'ok' => false, 'heading' => 'User not found', 'message' => 'No user matches that ID or campus email.'];
+        return ['title' => 'Update user information', 'blocks' => $blocks];
+    }
+    $blocks[] = stats([['Name', trim("{$existing['first_Name']} " . ($existing['middle_Name'] ? "{$existing['middle_Name']} " : '') . $existing['last_Name'])],
+        ['Role', $existing['user_Type']], ['Campus email', $existing['user_Email'] ?? 'Not on file']]);
+    $blocks[] = ['type' => 'form', 'title' => "Edit information for {$existing['first_Name']} {$existing['last_Name']} (ID {$existing['user_ID']})",
+        'endpoint' => 'update-user-info', 'submit' => 'Save changes', 'keep' => true,
+        'note' => $canUpdate ? 'The ID and campus email cannot be changed here.' : READ_ONLY_NOTICE,
+        'fields' => [
+            ['name' => 'user_ID', 'label' => 'User ID', 'type' => 'hidden', 'value' => (string) $existing['user_ID']],
+            ['name' => 'first_Name', 'label' => 'First name', 'required' => true, 'value' => $existing['first_Name']],
+            ['name' => 'middle_Name', 'label' => 'Middle name', 'value' => $existing['middle_Name'] ?? ''],
+            ['name' => 'last_Name', 'label' => 'Last name', 'required' => true, 'value' => $existing['last_Name']],
+            ['name' => 'gender', 'label' => 'Gender', 'value' => $existing['gender'] ?? '',
+                'options' => [['', '— Unspecified —'], ['Male', 'Male'], ['Female', 'Female'], ['Other', 'Other']]],
+            ['name' => 'DOB', 'label' => 'Date of birth', 'type' => 'date', 'value' => $existing['DOB'] ?? ''],
+            ['name' => 'street', 'label' => 'Street', 'value' => $existing['street'] ?? ''],
+            ['name' => 'city', 'label' => 'City', 'value' => $existing['city'] ?? ''],
+            ['name' => 'state', 'label' => 'State (2 letters)', 'value' => $existing['state'] ?? ''],
+            ['name' => 'zip_Code', 'label' => 'ZIP code', 'value' => $existing['zip_Code'] ?? ''],
+        ]];
+    return ['title' => 'Update user information', 'subtitle' => $canUpdate ? null : READ_ONLY_NOTICE, 'blocks' => $blocks];
+}
+
+// Room/building availability: for a chosen semester and standard time slot, which classrooms and
+// labs are free vs. already booked -- the same information Create Section checks one room at a
+// time, browsable here across the whole inventory. A read-only report; no security gate.
+function viewRoomAvailability(array $u, array $q): array
+{
+    $sems = rows('SELECT semester_ID, semester_Name FROM Semester ORDER BY start_Date');
+    $semester = in_array($q['semester'] ?? null, array_column($sems, 'semester_ID'), true) ? $q['semester'] : (currentSemester()['id'] ?? ($sems[0]['semester_ID'] ?? null));
+    $slots = rows("SELECT ts.time_Slot_ID AS id,
+        CONCAT((SELECT GROUP_CONCAT(d.day_ID ORDER BY FIELD(d.day_ID,'M','T','W','R','F') SEPARATOR '') FROM Time_Slot_Day d WHERE d.time_Slot_ID = ts.time_Slot_ID),
+          ' ', TIME_FORMAT(p.start_Time, '%l:%i %p'), ' – ', TIME_FORMAT(p.end_Time, '%l:%i %p')) AS label
+      FROM Time_Slot ts JOIN Time_Slot_Period tp ON tp.time_Slot_ID = ts.time_Slot_ID JOIN Period p ON p.period_ID = tp.period_ID
+      ORDER BY ts.time_Slot_ID");
+    $slotId = in_array($q['slot'] ?? null, array_column($slots, 'id'), true) ? $q['slot'] : ($slots[0]['id'] ?? null);
+    $filters = ['type' => 'filters', 'filters' => [
+        ['name' => 'semester', 'label' => 'Semester', 'value' => $semester, 'reload' => 'semester',
+            'options' => array_map(fn ($s) => [$s['semester_ID'], $s['semester_Name']], $sems)],
+        ['name' => 'slot', 'label' => 'Time slot', 'value' => (string) $slotId, 'reload' => 'slot',
+            'options' => array_map(fn ($t) => [(string) $t['id'], $t['label']], $slots)],
+    ]];
+    $rows = rows('SELECT r.room_ID AS `Room`, b.building_Name AS Building, r.room_No AS `Room No.`, r.room_Type AS Type,
+            COALESCE(lab.work_Stations, lec.seats) AS Capacity,
+            CASE WHEN m.CRN IS NULL THEN \'Free\' ELSE \'Occupied\' END AS Status,
+            m.CRN AS CRN, m.course_ID AS Course, CONCAT(fu.first_Name, \' \', fu.last_Name) AS Instructor
+          FROM Room r
+          JOIN Building b ON b.building_ID = r.building_ID
+          LEFT JOIN Lab lab ON lab.lab_ID = r.room_ID
+          LEFT JOIN Lecture lec ON lec.lecture_ID = r.room_ID
+          LEFT JOIN (' . MEETINGS . ') m ON m.room_ID = r.room_ID AND m.semester_ID = ? AND m.time_Slot_ID = ?
+          LEFT JOIN User fu ON fu.user_ID = m.faculty_ID
+          WHERE r.room_Type IN (\'Lecture\', \'Lab\')
+          ORDER BY b.building_Name, r.room_No', [$semester, $slotId]);
+    return ['title' => 'Room & building availability', 'blocks' => [
+        $filters,
+        ['type' => 'table', 'title' => 'Classrooms & labs', 'note' => $rows ? null : 'No semester or time slot is set up yet.',
+            'columns' => $rows ? array_keys($rows[0]) : ['Room', 'Building', 'Room No.', 'Type', 'Capacity', 'Status', 'CRN', 'Course', 'Instructor'],
+            'rows' => array_map('array_values', $rows)],
+        table('Offices (not time-based; shows the assigned faculty, if any)',
+            "SELECT r.room_ID AS Office, b.building_Name AS Building, r.room_No AS `Room No.`, o.no_Of_Desks AS Desks,
+                CONCAT(u.first_Name, ' ', u.last_Name) AS `Assigned to`
+              FROM Room r JOIN Building b ON b.building_ID = r.building_ID JOIN Office o ON o.office_ID = r.room_ID
+              LEFT JOIN Faculty f ON f.office_ID = r.room_ID LEFT JOIN User u ON u.user_ID = f.faculty_ID
+              WHERE r.room_Type = 'Office' ORDER BY b.building_Name, r.room_No"),
     ]];
 }
 
@@ -671,6 +807,133 @@ function viewCreateSection(array $u, array $q): array
         ]],
         $newest,
     ]];
+}
+
+function viewManageDepartments(array $u, array $q): array
+{
+    $canUpdate = adminCanUpdate((int) $u['id']);
+    $depts = rows('SELECT dept_ID, dept_Name, chair_ID, email, phone_No, office_ID FROM Department ORDER BY dept_Name');
+    $editId = (string) ($q['edit'] ?? '');
+    $editing = null;
+    foreach ($depts as $d) if ($d['dept_ID'] === $editId) { $editing = $d; break; }
+    $v = fn (string $name, string $fallback) => $editing !== null && $editing[$name] !== null ? (string) $editing[$name]
+        : (isset($q[$name]) ? (string) $q[$name] : $fallback);
+    $faculty = rows("SELECT f.faculty_ID, CONCAT(u.first_Name, ' ', u.last_Name) AS name,
+        (SELECT GROUP_CONCAT(dept_ID SEPARATOR '/') FROM Faculty_Department fd WHERE fd.faculty_ID = f.faculty_ID) AS depts
+      FROM Faculty f JOIN User u ON u.user_ID = f.faculty_ID ORDER BY u.last_Name");
+    $offices = rows("SELECT r.room_ID, b.building_Name, r.room_No FROM Room r JOIN Building b ON b.building_ID = r.building_ID
+      WHERE r.room_Type = 'Office' ORDER BY r.room_ID");
+    return ['title' => 'Manage departments', 'subtitle' => $canUpdate
+            ? 'Adding or updating a department is logged to the Audit Log.'
+            : READ_ONLY_NOTICE, 'blocks' => [
+        ['type' => 'form', 'title' => $editing ? "Edit {$editing['dept_Name']}" : 'Add a new department',
+            'endpoint' => 'upsert-department', 'submit' => $editing ? 'Save changes' : 'Create department', 'keep' => true,
+            'note' => 'Pick an existing department above to edit it; leaving it on "Add a new department" and entering a department ID that does not exist yet creates one.', 'fields' => [
+            ['name' => 'edit', 'label' => 'Edit existing department', 'value' => $editId, 'reload' => 'edit',
+                'options' => array_merge([['', '— Add a new department —']],
+                    array_map(fn ($d) => [$d['dept_ID'], "{$d['dept_ID']} {$d['dept_Name']}"], $depts))],
+            ['name' => 'dept_ID', 'label' => 'Department ID (e.g. CS)', 'value' => $v('dept_ID', ''), 'required' => true],
+            ['name' => 'dept_Name', 'label' => 'Name', 'value' => $v('dept_Name', ''), 'required' => true],
+            ['name' => 'chair_ID', 'label' => 'Chair', 'value' => $v('chair_ID', ''),
+                'options' => array_merge([['', '— None —']], array_map(fn ($f) => [(string) $f['faculty_ID'], "{$f['name']} ({$f['depts']})"], $faculty))],
+            ['name' => 'office_ID', 'label' => 'Office', 'value' => $v('office_ID', ''),
+                'options' => array_merge([['', '— None —']], array_map(fn ($r) => [$r['room_ID'], "{$r['building_Name']} {$r['room_No']}"], $offices))],
+            ['name' => 'email', 'label' => 'Email (optional)', 'value' => $v('email', '')],
+            ['name' => 'phone_No', 'label' => 'Phone (optional)', 'value' => $v('phone_No', '')],
+        ]],
+        table('Departments', "SELECT d.dept_ID AS ID, d.dept_Name AS Department, CONCAT(u.first_Name, ' ', u.last_Name) AS Chair,
+            d.email AS Email, d.phone_No AS Phone, d.office_ID AS Office
+          FROM Department d LEFT JOIN User u ON u.user_ID = d.chair_ID ORDER BY d.dept_Name"),
+    ]];
+}
+
+// Reassign faculty or change the time slot on an existing course section. Both actions are
+// blocked once the semester has started; reassignFaculty()/updateSectionTimeSlot() enforce that
+// (and every other constraint) -- this page just offers the two forms.
+function viewEditSection(array $u, array $q): array
+{
+    $canUpdate = adminCanUpdate((int) $u['id']);
+    $sections = rows("SELECT cs.CRN, cs.course_ID, cs.time_Slot_ID, cs.faculty_ID, s.semester_Name, s.start_Date <= CURDATE() AS started,
+        CONCAT(u.first_Name, ' ', u.last_Name) AS faculty_name
+      FROM Course_Section cs JOIN Semester s ON s.semester_ID = cs.semester_ID LEFT JOIN User u ON u.user_ID = cs.faculty_ID
+      ORDER BY s.start_Date DESC, cs.CRN");
+    if (!$sections) return ['title' => 'Edit a course section', 'subtitle' => 'There are no course sections yet.', 'blocks' => []];
+    $editCrn = (string) ($q['CRN'] ?? $sections[0]['CRN']);
+    $editing = null;
+    foreach ($sections as $s) if ((string) $s['CRN'] === $editCrn) { $editing = $s; break; }
+    if (!$editing) $editing = $sections[0];
+    $fac = rows("SELECT f.faculty_ID, CONCAT(u.first_Name, ' ', u.last_Name) AS name, f.faculty_Type,
+        (SELECT GROUP_CONCAT(fd.dept_ID SEPARATOR '/') FROM Faculty_Department fd WHERE fd.faculty_ID = f.faculty_ID) AS depts
+      FROM Faculty f JOIN User u ON u.user_ID = f.faculty_ID ORDER BY depts, u.last_Name");
+    $slots = rows("SELECT ts.time_Slot_ID AS id,
+        CONCAT((SELECT GROUP_CONCAT(d.day_ID ORDER BY FIELD(d.day_ID,'M','T','W','R','F') SEPARATOR '') FROM Time_Slot_Day d WHERE d.time_Slot_ID = ts.time_Slot_ID),
+          ' ', TIME_FORMAT(p.start_Time, '%l:%i %p'), ' – ', TIME_FORMAT(p.end_Time, '%l:%i %p')) AS label
+      FROM Time_Slot ts JOIN Time_Slot_Period tp ON tp.time_Slot_ID = ts.time_Slot_ID JOIN Period p ON p.period_ID = tp.period_ID
+      ORDER BY ts.time_Slot_ID");
+    $crnOptions = array_map(fn ($s) => [(string) $s['CRN'],
+        "{$s['CRN']} {$s['course_ID']} ({$s['semester_Name']}" . ($s['started'] ? ', started' : '') . ", now {$s['faculty_name']})"], $sections);
+    $note = $editing['started']
+        ? "{$editing['semester_Name']} has already started; both actions below will be refused for this section."
+        : 'Allowed only before the semester starts.';
+    return ['title' => 'Edit a course section', 'subtitle' => $canUpdate ? null : READ_ONLY_NOTICE, 'blocks' => [
+        ['type' => 'form', 'title' => 'Reassign faculty', 'endpoint' => 'reassign-faculty', 'submit' => 'Reassign', 'keep' => true, 'note' => $note, 'fields' => [
+            ['name' => 'CRN', 'label' => 'Course section', 'value' => $editCrn, 'reload' => 'CRN', 'options' => $crnOptions],
+            ['name' => 'faculty_ID', 'label' => 'New faculty', 'value' => (string) $editing['faculty_ID'],
+                'options' => array_map(fn ($f) => [(string) $f['faculty_ID'], "{$f['name']} ({$f['depts']}, {$f['faculty_Type']})"], $fac)],
+        ]],
+        ['type' => 'form', 'title' => 'Change time slot', 'endpoint' => 'update-section-time-slot', 'submit' => 'Change time slot', 'keep' => true, 'note' => $note, 'fields' => [
+            ['name' => 'CRN', 'label' => 'Course section', 'value' => $editCrn, 'reload' => 'CRN', 'options' => $crnOptions],
+            ['name' => 'time_Slot_ID', 'label' => 'New time slot', 'value' => (string) $editing['time_Slot_ID'],
+                'options' => array_map(fn ($t) => [(string) $t['id'], $t['label']], $slots)],
+        ]],
+    ]];
+}
+
+// Cancel a low-enrollment, not-yet-started section, which emails and drops every student enrolled
+// in it -- cancelSection() does both as one step.
+function viewCancelSections(array $u, array $q): array
+{
+    $canUpdate = adminCanUpdate((int) $u['id']);
+    $block = table('Under-enrolled upcoming sections', "SELECT cs.CRN, cs.course_ID AS Course, c.course_Name AS Title, s.semester_Name AS Semester,
+        (SELECT COUNT(*) FROM Enrollment e WHERE e.CRN = cs.CRN) AS Enrolled
+      FROM Course_Section cs JOIN Course c ON c.course_ID = cs.course_ID JOIN Semester s ON s.semester_ID = cs.semester_ID
+      WHERE s.start_Date > CURDATE() AND (SELECT COUNT(*) FROM Enrollment e WHERE e.CRN = cs.CRN) < 5
+      ORDER BY s.start_Date, cs.CRN", [],
+        'Cancelling emails every enrolled student a cancellation notice and drops them from the section.');
+    $block['action'] = ['label' => 'Cancel', 'endpoint' => 'cancel-section', 'column' => 'CRN', 'style' => 'danger', 'disabled' => !$canUpdate];
+    return ['title' => 'Cancel a low-enrollment section', 'subtitle' => $canUpdate ? null : READ_ONLY_NOTICE, 'blocks' => [$block]];
+}
+
+// Register a student into a section on their behalf: every constraint checkAdd() uses for the
+// student's own Register page applies here too, so the error (when any fail) names the exact
+// reason, same as the student would see. Not security-level gated -- see adminRegister()'s note.
+function viewAdminRegister(array $u, array $q): array
+{
+    $studentId = filter_var($q['student_ID'] ?? null, FILTER_VALIDATE_INT);
+    $blocks = [
+        ['type' => 'form', 'title' => 'Register a student', 'endpoint' => 'register-student', 'submit' => 'Register', 'keep' => true,
+            'note' => 'Every rule checked for the student\'s own registration is checked here too: hold, add window, prerequisites, seat availability, credit limit, time conflict, course level, and not already passed.', 'fields' => [
+            ['name' => 'student_ID', 'label' => 'Student ID', 'type' => 'number', 'required' => true, 'value' => $studentId !== false ? (string) $studentId : ''],
+            ['name' => 'CRN', 'label' => 'CRN', 'type' => 'number', 'required' => true, 'value' => (string) ($q['CRN'] ?? '')],
+        ]],
+    ];
+    if ($studentId !== false) {
+        $stu = one("SELECT CONCAT(u.first_Name, ' ', u.last_Name) AS name, s.student_Type, s.student_Year
+          FROM Student s JOIN User u ON u.user_ID = s.student_ID WHERE s.student_ID = ?", [$studentId]);
+        if ($stu) {
+            $cur = currentSemester();
+            $blocks[] = stats([['Student', $stu['name']], ['Type', $stu['student_Type']], ['Year', $stu['student_Year']]]);
+            $blocks[] = studentSchedule("{$cur['name']} schedule", $studentId, $cur['id']);
+        } else {
+            $blocks[] = ['type' => 'message', 'ok' => false, 'heading' => 'Student not found', 'message' => "No student with ID $studentId was found."];
+        }
+    }
+    [$semester, $deptId, $filters] = semesterFilter($q);
+    $blocks[] = $filters;
+    $blocks[] = table('Course sections (to find a CRN)', 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ', ' . SEATS . '
+      FROM Course_Section cs ' . SECTION_JOINS . " WHERE cs.semester_ID = ? AND (? = '' OR c.dept_ID = ?) ORDER BY cs.course_ID, cs.section_No",
+        [$semester, $deptId, $deptId]);
+    return ['title' => 'Register a student (admin-assisted)', 'blocks' => $blocks];
 }
 
 // ---------------- Statistics department ----------------
@@ -865,10 +1128,47 @@ function publicMajorBrowser(array $q): array
 function masterSchedule(array $q): array
 {
     [$semester, $deptId, $filters] = semesterFilter($q);
+
+    $courseOpt = rows('SELECT DISTINCT cs.course_ID FROM Course_Section cs WHERE cs.semester_ID = ? ORDER BY cs.course_ID', [$semester]);
+    $courseId = in_array($q['course'] ?? null, array_column($courseOpt, 'course_ID'), true) ? $q['course'] : '';
+
+    $facOpt = rows("SELECT DISTINCT cs.faculty_ID, CONCAT(u.first_Name, ' ', u.last_Name) AS name
+        FROM Course_Section cs JOIN User u ON u.user_ID = cs.faculty_ID WHERE cs.semester_ID = ? ORDER BY name", [$semester]);
+    $facOpt = array_map(fn ($f) => ['faculty_ID' => (string) $f['faculty_ID'], 'name' => $f['name']], $facOpt);
+    $facId = in_array($q['faculty'] ?? null, array_column($facOpt, 'faculty_ID'), true) ? $q['faculty'] : '';
+
+    $day = in_array($q['day'] ?? null, ['M', 'T', 'W', 'R', 'F'], true) ? $q['day'] : '';
+
+    $roomOpt = rows("SELECT room_ID FROM Room WHERE room_Type IN ('Lecture', 'Lab') ORDER BY room_ID");
+    $roomId = in_array($q['room'] ?? null, array_column($roomOpt, 'room_ID'), true) ? $q['room'] : '';
+
+    $filters['filters'] = array_merge($filters['filters'], [
+        ['name' => 'course', 'label' => 'Course', 'value' => $courseId,
+            'options' => array_merge([['', 'All courses']], array_map(fn ($c) => [$c['course_ID'], $c['course_ID']], $courseOpt))],
+        ['name' => 'faculty', 'label' => 'Faculty', 'value' => $facId,
+            'options' => array_merge([['', 'All faculty']], array_map(fn ($f) => [$f['faculty_ID'], $f['name']], $facOpt))],
+        ['name' => 'day', 'label' => 'Day', 'value' => $day,
+            'options' => [['', 'Any day'], ['M', 'Monday'], ['T', 'Tuesday'], ['W', 'Wednesday'], ['R', 'Thursday'], ['F', 'Friday']]],
+        ['name' => 'room', 'label' => 'Room', 'value' => $roomId,
+            'options' => array_merge([['', 'All rooms']], array_map(fn ($r) => [$r['room_ID'], $r['room_ID']], $roomOpt))],
+    ]);
+
+    // A day filter matches either the section's lecture meeting or its separate lab meeting.
+    $dayCond = $day !== ''
+        ? "(EXISTS (SELECT 1 FROM Time_Slot_Day d WHERE d.time_Slot_ID = cs.time_Slot_ID AND d.day_ID = ?)
+            OR EXISTS (SELECT 1 FROM Course_Section_Lab l JOIN Time_Slot_Day ld ON ld.time_Slot_ID = l.time_Slot_ID WHERE l.CRN = cs.CRN AND ld.day_ID = ?))"
+        : '1 = 1';
+    $params = [$semester, $deptId, $deptId, $courseId, $courseId, $facId, $facId, $roomId, $roomId, $roomId];
+    if ($day !== '') { $params[] = $day; $params[] = $day; }
+
     return [$filters,
         table('Course sections', 'SELECT ' . SCHEDULE_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ', ' . LAB_COLUMNS . ', ' . SEATS . '
           FROM Course_Section cs ' . SECTION_JOINS . ' ' . LAB_JOINS . "
-          WHERE cs.semester_ID = ? AND (? = '' OR c.dept_ID = ?) ORDER BY cs.course_ID, cs.section_No", [$semester, $deptId, $deptId])];
+          WHERE cs.semester_ID = ? AND (? = '' OR c.dept_ID = ?)
+            AND (? = '' OR cs.course_ID = ?) AND (? = '' OR cs.faculty_ID = ?)
+            AND (? = '' OR cs.room_ID = ? OR EXISTS (SELECT 1 FROM Course_Section_Lab l WHERE l.CRN = cs.CRN AND l.lab_ID = ?))
+            AND $dayCond
+          ORDER BY cs.course_ID, cs.section_No", $params)];
 }
 
 function viewMasterSchedule(array $u, array $q): array
@@ -1197,7 +1497,14 @@ const VIEWS = [
     'reset-password' => ['Reset a password', ['Admin'], 'viewResetPassword'],
     'create-course' => ['Create course', ['Admin'], 'viewCreateCourse'],
     'create-section' => ['Create section', ['Admin'], 'viewCreateSection'],
+    'manage-departments' => ['Manage departments', ['Admin'], 'viewManageDepartments'],
+    'edit-section' => ['Edit a section', ['Admin'], 'viewEditSection'],
+    'cancel-sections' => ['Cancel a section', ['Admin'], 'viewCancelSections'],
+    'admin-register' => ['Register a student', ['Admin'], 'viewAdminRegister'],
     'holds' => ['Student holds', ['Admin'], 'viewHolds'],
+    'faculty-roster' => ['Faculty workload', ['Admin'], 'viewFacultyRoster'],
+    'update-user-info' => ['Update user info', ['Admin'], 'viewUpdateUserInfo'],
+    'room-availability' => ['Room availability', ['Admin'], 'viewRoomAvailability'],
     'audit' => ['Audit log', ['Admin'], 'viewAudit'],
     'stats' => ['Statistics', ['StatDept'], 'viewStats'],
     'enrollment-counts' => ['Enrollment counts', ['StatDept'], 'viewEnrollmentCounts'],
