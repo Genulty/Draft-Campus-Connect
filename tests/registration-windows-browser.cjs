@@ -5,7 +5,7 @@ const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 (async () => {
-  const pages = JSON.parse(execFileSync('php', [path.join(__dirname, 'registration-windows.php'), '--pages'], { encoding: 'utf8' }));
+  const { progress, ...pages } = JSON.parse(execFileSync('php', [path.join(__dirname, 'registration-windows.php'), '--pages'], { encoding: 'utf8' }));
   const source = readFileSync(path.join(__dirname, '../public/login.js'), 'utf8');
   const openView = source.slice(source.indexOf('let currentView ='), source.indexOf('// Student audit:'));
   const renderer = source.slice(source.indexOf('function el('), source.indexOf("document.getElementById('nav').addEventListener"));
@@ -51,7 +51,31 @@ const assert = require('node:assert/strict');
         assert.ok((await page.evaluate(()=>requests.at(-1))).includes('semester=SP27'));
       }
     }
+    const expectedByTotal = { 8: '4 credits to go', 11: '1 credit to go', 12: 'Goal reached', 13: 'Goal reached' };
+    assert.deepEqual(Object.keys(progress), Object.keys(expectedByTotal));
+    for (const [total, fixtures] of Object.entries(progress)) {
+      await page.evaluate(async fixtures => {
+        window.fetch = async url => {
+          const dept = new URL(url, location.href).searchParams.get('dept') ?? '';
+          return { status: 200, json: async () => fixtures[dept] };
+        };
+        await openView('register', { semester: 'SP27' });
+      }, fixtures);
+      const dept = page.locator('select[name=dept]');
+      assert.equal(await dept.inputValue(), '');
+      const registration = page.locator('.table-card').filter({ has: page.getByRole('heading', { name: 'My Spring 2027 registration' }) });
+      const expectedRows = await registration.locator('tbody').innerText();
+      for (const value of ['TEST', 'OTHER', '']) {
+        await dept.selectOption(value);
+        assert.equal(await dept.inputValue(), value);
+        assert.equal(await registration.locator('tbody').innerText(), expectedRows);
+        assert.equal(await page.getByText(`${total} of 16`, { exact: true }).count(), 1);
+        const goalCard = page.locator('.stat').filter({ has: page.getByText('Credit Goal: 12', { exact: true }) });
+        assert.equal(await goalCard.locator('.stat-value').textContent(), expectedByTotal[total]);
+      }
+    }
     assert.deepEqual(errors,[]);
+    console.log('PASS: Full-time guidance and semester-wide registrations remain stable while switching departments.');
     console.log('PASS: Chromium rendered both-open, add-only, drop-only, last-drop-day, both-closed, and no-enrollment states; disabled controls blocked dispatch; semester/department navigation and hash passed; no browser errors. Requests/actions intercepted; no MySQL access.');
   } finally { await browser.close(); }
 })().catch(e=>{ console.error(e); process.exitCode=1; });
