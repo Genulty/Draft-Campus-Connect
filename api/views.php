@@ -395,9 +395,10 @@ function viewRegister(array $u, array $q): array
     $registered = (int) $credits['n'];
     $loadStats = [['Registered credits', "$registered of " . (MAX_CREDITS[$load] ?? '—')]];
     if ($me['student_Type'] === 'Undergraduate' && $load === 'Full-time') {
-        $remaining = 12 - $registered;
-        $loadStats[] = ['Full-time target (12 credits)', $remaining <= 0 ? 'Full-time target met.'
-            : $remaining . ($remaining === 1 ? ' more credit' : ' more credits') . ' to reach a full-time load.'];
+        $goal = 12;
+        $remaining = $goal - $registered;
+        $loadStats[] = ["Credit Goal: $goal", $remaining <= 0 ? 'Goal reached'
+            : $remaining . ($remaining === 1 ? ' credit to go' : ' credits to go')];
     }
     $loadStats[] = ['Recorded enrollment status', $load];
 

@@ -51,6 +51,8 @@ const assert = require('node:assert/strict');
         assert.ok((await page.evaluate(()=>requests.at(-1))).includes('semester=SP27'));
       }
     }
+    const expectedByTotal = { 8: '4 credits to go', 11: '1 credit to go', 12: 'Goal reached', 13: 'Goal reached' };
+    assert.deepEqual(Object.keys(progress), Object.keys(expectedByTotal));
     for (const [total, fixtures] of Object.entries(progress)) {
       await page.evaluate(async fixtures => {
         window.fetch = async url => {
@@ -68,7 +70,8 @@ const assert = require('node:assert/strict');
         assert.equal(await dept.inputValue(), value);
         assert.equal(await registration.locator('tbody').innerText(), expectedRows);
         assert.equal(await page.getByText(`${total} of 16`, { exact: true }).count(), 1);
-        assert.equal(await page.getByText(total === '8' ? '4 more credits to reach a full-time load.' : 'Full-time target met.', { exact: true }).count(), 1);
+        const goalCard = page.locator('.stat').filter({ has: page.getByText('Credit Goal: 12', { exact: true }) });
+        assert.equal(await goalCard.locator('.stat-value').textContent(), expectedByTotal[total]);
       }
     }
     assert.deepEqual(errors,[]);

@@ -155,17 +155,20 @@ expectAction('addSection',2,99999,false,'That course section does not exist'); e
 // Exercise load guidance and bindings using only generic SQLite fixture sections.
 $clock = '2027-01-15';
 $progress = [];
-foreach ([91001, 91002, 91003] as $i => $crn) {
+$expectedByTotal = [8 => '4 credits to go', 11 => '1 credit to go', 12 => 'Goal reached', 13 => 'Goal reached'];
+$total = 0;
+foreach ([4, 4, 3, 1, 1] as $i => $credits) {
+    $crn = 91001 + $i;
     $code = 'LOAD' . ($i + 100);
-    $memory->prepare("INSERT INTO Course VALUES (?, ?, 4, 'Undergraduate')")->execute([$code, 'Load test course']);
+    $memory->prepare("INSERT INTO Course VALUES (?, ?, ?, 'Undergraduate')")->execute([$code, 'Load test course', $credits]);
     $memory->prepare("INSERT INTO Course_Section VALUES (?, ?, 'SP27', 1, 10, 10)")->execute([$crn, $code]);
     $memory->prepare('INSERT INTO Enrollment VALUES (2, ?, NULL)')->execute([$crn]);
-    if ($i === 0) continue;
-    $total = ($i + 1) * 4;
-    $expected = $total === 8 ? '4 more credits to reach a full-time load.' : 'Full-time target met.';
+    $total += $credits;
+    if (!isset($expectedByTotal[$total])) continue;
     $base = viewRegister(['id'=>2,'role'=>'Student'], ['semester'=>'SP27']);
     check($base['blocks'][1]['items'][0]['value'] === "$total of 16", 'Wrong semester credits');
-    check($base['blocks'][1]['items'][1]['value'] === $expected, 'Wrong full-time guidance');
+    check($base['blocks'][1]['items'][1] === ['label'=>'Credit Goal: 12','value'=>$expectedByTotal[$total]],
+        "Wrong credit goal guidance at $total credits");
     check($base['blocks'][1]['items'][2]['value'] === 'Full-time', 'Recorded status changed');
     check(count($base['blocks'][2]['rows']) === $i + 1, 'Unexpected registered sections');
     foreach (['', 'TEST', 'OTHER'] as $dept) {
@@ -181,7 +184,7 @@ foreach ([91001, 91002, 91003] as $i => $crn) {
     }
 }
 if (($argv[1] ?? '')==='--pages') { echo json_encode($pages + ['progress'=>$progress],JSON_THROW_ON_ERROR); exit; }
-echo "PASS: All Departments default, filter-only offering bindings, unchanged registrations, and full-time guidance at 8 and 12 credits.
+echo "PASS: All Departments default, filter-only offering bindings, unchanged registrations, and credit goal guidance at 8, 11, 12, and 13 credits.
 ";
 echo "PASS: $cases stored-date boundary scenarios across six semesters, students with/without registrations, isolated add-only state, independent action guards, malformed CRNs, role restrictions, and safe filter selection.\n";
 echo "No MySQL connection: all fixtures are SQLite :memory:, enrollment writes stopped before execution. Existing prerequisite/seat/conflict rules remain unchanged; their live behavior is not simulated by these stubs.\n";
