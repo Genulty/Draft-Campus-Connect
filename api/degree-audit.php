@@ -300,6 +300,12 @@ function calculateDegreeAudit(array $profile, array $programs, array $requiremen
             $requirement['best_grade'] = $best[$code]['course']['grade'] ?? null;
             $requirement['attempts'] = array_map(static fn ($a) => ['grade' => $a['grade'], 'semester' => $a['semester'], 'crn' => $a['crn']], $attempts[$code] ?? []);
             $requirement['met'] = $met;
+            // A specific required course shows one of exactly three statuses to the student:
+            // Completed, In progress, or Not completed. The richer internal states (Rules
+            // unavailable, Review needed) stay in place for the newer checklist-level statuses
+            // (General Education, Liberal Arts, etc.) elsewhere in this file -- this collapse
+            // applies only to this per-program, per-required-course array.
+            $requirement['status'] = $met ? 'Completed' : ($requirement['status'] === 'In progress' ? 'In progress' : 'Not completed');
             $program['requirements'][] = $requirement;
             $program['listed_credits'] += (int) $requirement['credits'];
             if ($met) {
