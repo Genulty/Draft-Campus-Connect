@@ -502,7 +502,6 @@ function renderDegreeAudit(audit, majorOptions) {
       values.append(field);
     }
     status.before(values);
-    if (degree.draft) panel.append(el('p', 'audit-program-note audit-credit-note', 'Draft rule'));
     if (degree.status === 'Rules unavailable') {
       const message = degree.program ? 'No credit target is configured for this degree program.'
         : 'A primary degree program is missing from the student record.';
@@ -516,7 +515,6 @@ function renderDegreeAudit(audit, majorOptions) {
       const item = el('li');
       const name = el('span');
       name.append(el('span', null, requirement.name));
-      if (requirement.draft) name.append(el('span', 'audit-rule-meta', ' · Draft rule'));
       item.append(name, auditStatus(requirement.status));
       checklist.append(item);
     }
