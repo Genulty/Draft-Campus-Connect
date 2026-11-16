@@ -807,15 +807,27 @@ function viewCreateCourse(array $u, array $q): array
     $deptId = in_array($q['dept_ID'] ?? null, array_column($depts, 'dept_ID'), true) ? $q['dept_ID'] : '';
     // The chosen department's current courses, so a new course doesn't repeat one.
     $existing = $deptId === '' ? null : table("Courses already in {$deptId}", "SELECT c.course_ID AS Course, c.course_Name AS Title,
-        c.course_Credits AS Credits, c.course_Type AS Level FROM Course c WHERE c.dept_ID = ? ORDER BY c.course_ID", [$deptId]);
+        c.course_Credits AS Credits, c.course_Type AS Level,
+        COALESCE((SELECT GROUP_CONCAT(CONCAT(cp.prerequisite_Course_ID, ' (', cp.min_Grade_Req, ')') ORDER BY cp.prerequisite_Course_ID SEPARATOR ', ')
+          FROM Course_Prerequisite cp WHERE cp.course_ID = c.course_ID), '—') AS Prerequisites
+        FROM Course c WHERE c.dept_ID = ? ORDER BY c.course_ID", [$deptId]);
     if (!adminCanUpdate((int) $u['id'])) {
         // Read-Only admins see no creation form at all (the catalog is on the Courses page).
         return ['title' => 'Create a course', 'subtitle' => READ_ONLY_NOTICE, 'blocks' => []];
     }
     $v = fn (string $name) => is_string($q[$name] ?? null) ? $q[$name] : '';
+    // Prerequisite choices: every catalog course, with the chosen department's courses listed first.
+    $catalog = rows('SELECT p.course_ID, p.course_Name, p.dept_ID FROM Course p ORDER BY p.dept_ID <> ?, p.course_ID', [$deptId]);
+    $prereqFields = [];
+    for ($i = 1; $i <= PREREQ_SLOTS; $i++) {
+        $prereqFields[] = ['name' => "prereq_$i", 'label' => "Prerequisite $i (optional)", 'value' => $v("prereq_$i"),
+            'options' => array_merge([['', 'None']], array_map(fn ($c) => [$c['course_ID'], "{$c['course_ID']} {$c['course_Name']}"], $catalog))];
+        $prereqFields[] = ['name' => "prereq_grade_$i", 'label' => 'Minimum grade', 'value' => $v("prereq_grade_$i") ?: 'C',
+            'options' => array_map(fn ($g) => [$g, "$g or better"], PREREQ_GRADES)];
+    }
     return ['title' => 'Create a course', 'subtitle' => 'Adds a course to the catalog. Sections are scheduled separately on Create section.', 'blocks' => [
         ['type' => 'form', 'title' => 'New catalog course', 'endpoint' => 'create-course', 'submit' => 'Create course', 'keep' => true,
-            'note' => 'Course ID: the department code and a 3-digit number, for example CHEM350. Undergraduate courses use 100–499 and graduate courses 500–699.',
+            'note' => 'Course ID: the department code and a 3-digit number, for example CHEM350. Undergraduate courses use 100–499 and graduate courses 500–699. Prerequisites are optional: a student must pass each one with at least the grade shown before registering.',
             'fields' => [
             ['name' => 'dept_ID', 'label' => 'Department', 'value' => $deptId, 'required' => true, 'reload' => 'dept_ID', 'keepOnReload' => true,
                 'options' => array_merge([['', 'Choose a department']], array_map(fn ($d) => [$d['dept_ID'], $d['dept_Name']], $depts))],
@@ -826,6 +838,7 @@ function viewCreateCourse(array $u, array $q): array
             ['name' => 'course_Type', 'label' => 'Course level', 'value' => $v('course_Type') ?: 'Undergraduate', 'required' => true,
                 'options' => [['Undergraduate', 'Undergraduate (100–499)'], ['Graduate', 'Graduate (500–699)']]],
             ['name' => 'course_Desc', 'label' => 'Description (optional)', 'value' => $v('course_Desc'), 'maxLength' => 500],
+            ...$prereqFields,
         ]],
         ...($existing ? [$existing] : []),
     ]];

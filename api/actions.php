@@ -210,6 +210,9 @@ function adminCanUpdate(int $adminId): bool
     return ($admin['security_Level'] ?? null) === 'Read-Write';
 }
 
+const PREREQ_SLOTS = 3;
+const PREREQ_GRADES = ['A', 'B', 'C', 'D'];
+
 function createCourse(int $adminId, array $form): array
 {
     if (!adminCanUpdate($adminId)) fail('Read-Only admins cannot create courses.');
@@ -238,14 +241,35 @@ function createCourse(int $adminId, array $form): array
     $sameTitle = rows('SELECT c.course_ID FROM Course c WHERE c.dept_ID = ? AND LOWER(c.course_Name) = LOWER(?) LIMIT 1', [$department, $name]);
     if ($sameTitle) fail("$department already has a course called \"$name\" ({$sameTitle[0]['course_ID']}).");
 
-    try {
-        run('INSERT INTO Course (course_ID, course_Name, dept_ID, course_Credits, course_Desc, course_Type) VALUES (?, ?, ?, ?, ?, ?)',
-            [$id, $name, $department, (int) $credits, $description === '' ? null : $description, $type]);
-    } catch (PDOException $error) {
-        if (($error->errorInfo[1] ?? null) === 1062) fail("Course $id already exists.");
-        throw $error;
+    // Up to three optional prerequisites, each an existing course with a minimum grade.
+    $prereqs = [];
+    for ($i = 1; $i <= PREREQ_SLOTS; $i++) {
+        $prereq = strtoupper($field("prereq_$i"));
+        if ($prereq === '') continue;
+        $grade = $field("prereq_grade_$i") ?: 'C';
+        if (!in_array($grade, PREREQ_GRADES, true)) fail('Choose a minimum grade of A, B, C or D for each prerequisite.');
+        if ($prereq === $id) fail('A course cannot be its own prerequisite.');
+        if (isset($prereqs[$prereq])) fail("$prereq is listed as a prerequisite more than once.");
+        $found = rows('SELECT p.course_ID, p.course_Type FROM Course p WHERE p.course_ID = ?', [$prereq]);
+        if (!$found) fail("Prerequisite $prereq is not in the course catalog.");
+        if ($type === 'Undergraduate' && $found[0]['course_Type'] === 'Graduate') fail("An undergraduate course cannot require the graduate course $prereq.");
+        $prereqs[$prereq] = $grade;
     }
-    return ['message' => "Created $id — $name in the course catalog."];
+
+    transaction(function () use ($id, $name, $department, $credits, $description, $type, $prereqs) {
+        try {
+            run('INSERT INTO Course (course_ID, course_Name, dept_ID, course_Credits, course_Desc, course_Type) VALUES (?, ?, ?, ?, ?, ?)',
+                [$id, $name, $department, (int) $credits, $description === '' ? null : $description, $type]);
+        } catch (PDOException $error) {
+            if (($error->errorInfo[1] ?? null) === 1062) fail("Course $id already exists.");
+            throw $error;
+        }
+        foreach ($prereqs as $prereq => $grade) {
+            run('INSERT INTO Course_Prerequisite (course_ID, prerequisite_Course_ID, min_Grade_Req) VALUES (?, ?, ?)', [$id, $prereq, $grade]);
+        }
+    });
+    $list = implode(', ', array_map(fn ($c, $g) => "$c ($g or better)", array_keys($prereqs), $prereqs));
+    return ['message' => "Created $id — $name in the course catalog" . ($list === '' ? '.' : ", with prerequisites $list.")];
 }
 
 // ---------- Admin: create a course section (A-R26, UC-13) ----------
