@@ -117,11 +117,16 @@ switch (true) {
             'verify-password-code' => $everyone, 'complete-password-change' => $everyone,
             'create-course' => ['Admin'], 'create-section' => ['Admin'], 'create-user' => ['Admin'], 'send-password-reset' => ['Admin'],
             'record-attendance' => ['Faculty'], 'record-grade' => ['Faculty'],
+            'upsert-department' => ['Admin'], 'reassign-faculty' => ['Admin'], 'update-section-time-slot' => ['Admin'],
+            'cancel-section' => ['Admin'], 'register-student' => ['Admin'], 'place-hold' => ['Admin'],
+            'remove-hold' => ['Admin'], 'update-user-info' => ['Admin'],
         ];
         if (!in_array($user['role'], $allowed[$m[1]] ?? [], true)) respond(403, ['error' => 'Your role cannot do that.']);
         // Admin security levels (A-R2, A-F2): a Read-Only admin can view records but never change them.
-        // (Every user may still update their own address and password.)
-        if ($allowed[$m[1]] === ['Admin'] && !adminCanUpdate((int) $user['id'])) {
+        // (Every user may still update their own address and password.) register-student is the one
+        // exception: its use case lists plain "Admin, Student" as actors, not "(read-write)", so it is
+        // never gated by security level.
+        if ($allowed[$m[1]] === ['Admin'] && $m[1] !== 'register-student' && !adminCanUpdate((int) $user['id'])) {
             respond(403, ['error' => 'Your security level is Read-Only: you can view records but not change them.']);
         }
         respond(200, match ($m[1]) {
@@ -143,6 +148,14 @@ switch (true) {
             'send-password-reset' => adminSendReset($user['id'], $body),
             'record-attendance' => recordAttendance($user['id'], $body),
             'record-grade' => recordGrade($user['id'], $body),
+            'upsert-department' => upsertDepartment((int) $user['id'], $body),
+            'reassign-faculty' => reassignFaculty((int) $user['id'], $body),
+            'update-section-time-slot' => updateSectionTimeSlot((int) $user['id'], $body),
+            'cancel-section' => cancelSection((int) $user['id'], $body),
+            'register-student' => adminRegister((int) $user['id'], $body),
+            'place-hold' => placeHold((int) $user['id'], $body),
+            'remove-hold' => removeHold((int) $user['id'], $body),
+            'update-user-info' => updateUserInfo((int) $user['id'], $body),
         });
 
     default:
