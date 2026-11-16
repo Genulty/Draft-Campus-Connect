@@ -377,11 +377,15 @@ function viewGrades(array $u, array $q): array
 require_once __DIR__ . '/degree-audit.php';
 function viewDegreeAudit(array $u, array $q): array
 {
-    $audit = loadDegreeAudit((int) $u['id']);
+    $selection = $q['preview_major'] ?? '';
+    if (!is_string($selection)) fail('Choose an undeclared major offered at your academic level.');
+    $audit = loadDegreeAudit((int) $u['id'], previewMajorId: $selection === '' ? null : $selection);
+    $options = $audit === null ? [] : ($audit['preview']['options'] ?? degreeAuditMajorOptions($audit['profile']['type'], $audit['programs']));
+    unset($audit['preview']['options']);
     return ['title' => 'Degree Audit',
         'blocks' => $audit === null
             ? [['type' => 'message', 'ok' => false, 'heading' => 'Academic profile unavailable', 'message' => 'No student academic profile is recorded for this account.']]
-            : [['type' => 'degree-audit', 'audit' => $audit]]];
+            : [['type' => 'degree-audit', 'audit' => $audit, 'major_options' => $options]]];
 }
 
 // A student's majors and minors, with the forms to declare, change and drop them (S-R24 to S-R30).

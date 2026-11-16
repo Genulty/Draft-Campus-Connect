@@ -15,7 +15,7 @@ function auditGradeRank(?string $grade): ?int
     return $rank === false ? null : $rank;
 }
 
-function loadDegreeAudit(int $studentId, bool $includeCreditPolicy = true): ?array
+function loadDegreeAudit(int $studentId, bool $includeCreditPolicy = true, ?string $previewMajorId = null): ?array
 {
     $profile = one("SELECT s.student_ID AS id, s.student_Type AS type, s.student_Year AS year,
         u.first_Name, u.middle_Name, u.last_Name, CURDATE() AS as_of,
@@ -44,19 +44,12 @@ function loadDegreeAudit(int $studentId, bool $includeCreditPolicy = true): ?arr
       WHERE s.student_ID = ? ORDER BY is_primary DESC, m.major_ID", [$studentId]);
     foreach (rows("SELECT 'Minor' AS kind, m.minor_ID AS id, m.minor_Name AS name, 0 AS is_primary, 1 AS declared
         FROM Student_Minor sm JOIN Minor m ON m.minor_ID = sm.minor_ID WHERE sm.student_ID = ? ORDER BY m.minor_ID", [$studentId]) as $minor) $programs[] = $minor;
-    // Evaluate the declarations read above even if a major change commits during this request.
-    $programIds = ['Major' => [], 'Minor' => []];
-    foreach ($programs as $program) $programIds[$program['kind']][] = $program['id'];
-    $marks = static fn (array $ids) => $ids ? implode(', ', array_fill(0, count($ids), '?')) : 'NULL';
-    $requirements = rows("SELECT 'Major' AS kind, r.major_ID AS program_id, r.course_ID AS code,
-        c.course_Name AS title, c.course_Credits AS credits, r.min_Grade_Req AS minimum_grade
-      FROM Major_Course_Requirement r LEFT JOIN Course c ON c.course_ID = r.course_ID
-      WHERE r.major_ID IN ({$marks($programIds['Major'])})
-      UNION ALL
-      SELECT 'Minor', r.minor_ID, r.course_ID, c.course_Name, c.course_Credits, r.min_Grade_Req
-      FROM Minor_Course_Requirement r LEFT JOIN Course c ON c.course_ID = r.course_ID
-      WHERE r.minor_ID IN ({$marks($programIds['Minor'])})
-      ORDER BY kind, program_id, code", [...$programIds['Major'], ...$programIds['Minor']]);
+    $choices = $selected = null;
+    if ($previewMajorId !== null) {
+        $choices = degreeAuditMajorOptions($profile['type'], $programs);
+        $selected = $choices[$previewMajorId] ?? null;
+        if ($selected === null) fail('Choose an undeclared major offered at your academic level.');
+    }
     $history = rows("SELECT h.CRN AS crn, h.course_ID AS code, c.course_Name AS title, c.course_Credits AS credits,
         h.grade, h.semester_ID AS semester_id, COALESCE(sem.semester_Name, h.semester_ID) AS semester, sem.start_Date AS term_start,
         cs.course_ID AS section_course, cs.semester_ID AS section_semester,
@@ -84,14 +77,138 @@ function loadDegreeAudit(int $studentId, bool $includeCreditPolicy = true): ?arr
             if ($error->getCode() !== '42S02') throw $error;
         }
     }
-    $creditPolicy = $includeCreditPolicy && !empty($programs[0]['is_primary'])
-        ? loadDegreeCreditPolicy($programs[0]['id'])
-        : null;
-    $supplemental = $creditPolicy
-        ? loadAuditSupplementalPolicy($creditPolicy['id'], $studentId, $profile['as_of'])
-        : [];
-    $electives = $creditPolicy ? loadAuditElectivePolicy($creditPolicy['id']) : [];
-    return calculateDegreeAudit($profile, $programs, $requirements, $history, $enrollments, $genEd, $creditPolicy, $supplemental, $electives);
+    // Both audits use the same transcript, enrollment, and shared Gen Ed inputs.
+    $evaluate = static function (array $programs) use ($profile, $history, $enrollments, $genEd, $includeCreditPolicy, $studentId): array {
+        $creditPolicy = $includeCreditPolicy && !empty($programs[0]['is_primary'])
+            ? loadDegreeCreditPolicy($programs[0]['id'])
+            : null;
+        $supplemental = $creditPolicy ? loadAuditSupplementalPolicy($creditPolicy['id'], $studentId, $profile['as_of']) : [];
+        $electives = $creditPolicy ? loadAuditElectivePolicy($creditPolicy['id']) : [];
+        return calculateDegreeAudit($profile, $programs, degreeAuditRequirements($programs), $history, $enrollments,
+            $genEd, $creditPolicy, $supplemental, $electives);
+    };
+    $current = $evaluate($programs);
+    if ($selected === null) return $current;
+
+    $simulated = [['kind' => 'Major', 'id' => $previewMajorId, 'name' => $selected, 'is_primary' => 1, 'declared' => 1]];
+    foreach ($programs as $program) {
+        if (!$program['is_primary']) $simulated[] = $program;
+    }
+    $preview = $evaluate($simulated);
+    return $preview + ['preview' => [
+        'major_id' => $previewMajorId, 'major_name' => $selected, 'options' => $choices,
+    ] + compareDegreeAuditPreview($current, $preview)];
+}
+
+// The catalog has no active flag or independent level. Use required courses
+// or recorded primary majors as evidence of a program's academic level.
+function degreeAuditMajorOptions(string $level, array $programs): array
+{
+    $declared = array_column(array_filter($programs, static fn ($p) => $p['kind'] === 'Major'), 'id');
+    $options = [];
+    foreach (rows('SELECT m.major_ID AS id, m.major_Name AS name FROM Major m
+        WHERE NOT EXISTS (SELECT 1 FROM Major_Course_Requirement r JOIN Course c USING (course_ID)
+            WHERE r.major_ID = m.major_ID AND c.course_Type <> ?)
+          AND (EXISTS (SELECT 1 FROM Major_Course_Requirement r WHERE r.major_ID = m.major_ID)
+            OR EXISTS (SELECT 1 FROM Student s WHERE s.major_ID = m.major_ID AND s.student_Type = ?))
+        ORDER BY m.major_Name', [$level, $level]) as $major) {
+        if (!in_array($major['id'], $declared, true)) $options[$major['id']] = $major['name'];
+    }
+    return $options;
+}
+
+function degreeAuditRequirements(array $programs): array
+{
+    // Evaluate the declarations read above even if a major change commits during this request.
+    $programIds = ['Major' => [], 'Minor' => []];
+    foreach ($programs as $program) $programIds[$program['kind']][] = $program['id'];
+    $marks = static fn (array $ids) => $ids ? implode(', ', array_fill(0, count($ids), '?')) : 'NULL';
+    return rows("SELECT 'Major' AS kind, r.major_ID AS program_id, r.course_ID AS code,
+        c.course_Name AS title, c.course_Credits AS credits, r.min_Grade_Req AS minimum_grade
+      FROM Major_Course_Requirement r LEFT JOIN Course c ON c.course_ID = r.course_ID
+      WHERE r.major_ID IN ({$marks($programIds['Major'])})
+      UNION ALL
+      SELECT 'Minor', r.minor_ID, r.course_ID, c.course_Name, c.course_Credits, r.min_Grade_Req
+      FROM Minor_Course_Requirement r LEFT JOIN Course c ON c.course_ID = r.course_ID
+      WHERE r.minor_ID IN ({$marks($programIds['Minor'])})
+      ORDER BY kind, program_id, code", [...$programIds['Major'], ...$programIds['Minor']]);
+}
+
+// A match needs completed coursework selected by the evaluator. Alternate options,
+// in-progress courses, and placement without coursework are not course allocations.
+function degreeAuditAppliedCourses(array $audit, bool $includeLiberalArts): array
+{
+    $applied = [];
+    $add = static function (array $match, string $requirement, bool $draft) use (&$applied): void {
+        if ($match['status'] !== 'Completed' || empty($match['course'])) return;
+        $course = $match['course'];
+        $applied[$course['code']] ??= ['code' => $course['code'], 'title' => $course['title'], 'requirements' => []];
+        $applied[$course['code']]['requirements'][] = $requirement . ($draft ? ' (draft)' : '');
+    };
+    foreach ($audit['programs'] as $program) {
+        foreach ($program['requirements'] as $rule) $add($rule, $program['name'], false);
+    }
+    foreach ($audit['gen_ed'] as $rule) $add($rule, $rule['name'], true);
+    if ($audit['diversity'] !== null) $add($audit['diversity'], 'Diversity', $audit['diversity']['draft']);
+    foreach ($audit['proficiency']['requirements'] ?? [] as $rule) $add($rule, $rule['name'], $rule['draft']);
+    foreach (['major_electives' => 'Major Electives', 'free_electives' => 'Free Electives', 'liberal_arts' => 'Liberal Arts'] as $key => $label) {
+        $block = $audit[$key] ?? null;
+        $courses = array_filter($block['courses'] ?? [], static fn ($c) => $c['status'] === 'Completed');
+        if ($key === 'liberal_arts' && !$includeLiberalArts) continue;
+        foreach ($courses as $course) $add(['status' => 'Completed', 'course' => $course], $label, $block['draft']);
+    }
+    return $applied;
+}
+
+function compareDegreeAuditPreview(array $current, array $preview): array
+{
+    // A capped total does not identify which Liberal Arts courses were applied.
+    $hasUnallocatedCredits = static function (array $audit): bool {
+        $block = $audit['liberal_arts'];
+        $earned = array_filter($block['courses'], static fn ($course) => $course['status'] === 'Completed');
+        return array_sum(array_column($earned, 'credits')) > ($block['credits_applied'] ?? 0);
+    };
+    $compareLiberalArts = !$hasUnallocatedCredits($current) && !$hasUnallocatedCredits($preview);
+    $before = degreeAuditAppliedCourses($current, $compareLiberalArts);
+    $after = degreeAuditAppliedCourses($preview, $compareLiberalArts);
+    $stillCounts = array_intersect_key($after, $before);
+    // Surface courses that lost a mapped use even if another block still uses them.
+    $lostUses = [];
+    foreach ($before as $code => $course) {
+        $lost = array_values(array_diff($course['requirements'], $after[$code]['requirements'] ?? []));
+        if ($lost) $lostUses[] = array_replace($course, ['requirements' => $lost]);
+    }
+    $primary = $preview['programs'][0];
+    $needed = [];
+    foreach ($primary['requirements'] as $rule) {
+        if (!$rule['met']) $needed[] = ['name' => $rule['title'] ?? $rule['code'], 'status' => $rule['status']];
+    }
+    // Program-specific detail and options remain in the full audit below.
+    $additional = array_slice($preview['degree_requirements']['checklist'], count($preview['programs']));
+    $draftBlocks = [
+        'General Education' => (bool) $preview['gen_ed'],
+        'Liberal Arts' => $preview['liberal_arts']['draft'],
+        'Diversity' => $preview['diversity']['draft'] ?? false,
+        'Proficiency' => $preview['proficiency']['draft'] ?? false,
+        'Major Electives' => $preview['major_electives']['draft'] ?? false,
+        'Free Electives' => $preview['free_electives']['draft'] ?? false,
+    ];
+    foreach ($additional as &$rule) {
+        if (!empty($draftBlocks[$rule['name']])) $rule['name'] .= ' (draft)';
+    }
+    unset($rule);
+    if ($preview['degree_requirements']['status'] === 'Rules unavailable') {
+        array_unshift($additional, ['name' => 'Degree credit requirements', 'status' => 'Rules unavailable']);
+    }
+    return [
+        'still_counts' => array_values($stillCounts),
+        'newly_counts' => array_values(array_diff_key($after, $before)),
+        'lost_uses' => $lostUses,
+        'compare_liberal_arts' => $compareLiberalArts,
+        'needed' => $needed,
+        'primary_status' => auditRequirementBlockStatus($primary['requirements']),
+        'additional' => array_values(array_filter($additional, static fn ($r) => $r['status'] !== 'Completed')),
+    ];
 }
 
 function loadDegreeCreditPolicy(string $primaryMajorId): ?array

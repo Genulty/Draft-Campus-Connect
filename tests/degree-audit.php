@@ -86,7 +86,9 @@ $a=calculateDegreeAudit($profile,$programs,$requirements,[$attempt,$retry],[]);
 check($a['credits']['earned_provisional']===3 && $a['programs'][0]['met']===1 && count($a['history'])===2,'Repeat credits or best grade are incorrect.');
 $unknown=$attempt;$unknown['grade']=$unknown['enrollment_grade']='P';
 $a=calculateDegreeAudit($profile,$programs,$requirements,[$unknown],[]);
-check($a['credits']['earned_provisional']===0 && $a['programs'][0]['requirements'][0]['status']==='Review needed','Unknown grade falsely earned credits or met a requirement.');
+check($a['credits']['earned_provisional']===0 && $a['programs'][0]['requirements'][0]['status']==='Not completed'
+    && $a['programs'][0]['requirements'][0]['detail']==='The transcript grade is unsupported.'
+    && !$a['programs'][0]['requirements'][0]['met'] && $a['review'], 'Unknown grade was credited or review evidence was lost.');
 $a=calculateDegreeAudit($profile,$programs,[],[],[]);
 check($a['programs'][0]['percent']===null && $a['credits']['earned_provisional']===0,'Empty course list falsely marked complete.');
 $conflict=$attempt;$conflict['enrollment_grade']='A';
@@ -130,7 +132,8 @@ check($a['programs'][0]['requirements'][0]['detail']==='Transcript grade D is be
 $courseConflict = array_replace($attempt, ['enrollment_course'=>'C2']);
 $a = calculateDegreeAudit($profile, $programs, $requirements, [$courseConflict], [$active], $genEd);
 check($a['credits']['earned_provisional']===0 && $a['gen_ed'][0]['status']==='Review needed'
-    && $a['programs'][1]['requirements'][0]['status']==='Review needed'
+    && $a['programs'][1]['requirements'][0]['status']==='Not completed'
+    && $a['programs'][1]['requirements'][0]['detail']==='Transcript and section/enrollment records disagree.'
     && $a['gen_ed'][0]['options'][1]['status']==='Review needed', 'Conflicting enrollment identifier was not reconciled.');
 $futureGrade = array_replace($retry, ['term_start'=>'2027-01-01']);
 $a = calculateDegreeAudit($profile, [], [], [$futureGrade], [], $genEd);
@@ -147,7 +150,9 @@ foreach ([$unmapped, $badMinimum] as $rules) {
     check($a['gen_ed'][0]['status']==='Rules unavailable', 'An unconfigured rule was evaluated.');
 }
 $a = calculateDegreeAudit($profile, $programs, $requirements, [], [$e], $genEd);
-check($a['programs'][0]['requirements'][0]['status']==='Review needed' && $a['gen_ed'][0]['status']==='Review needed',
+check($a['programs'][0]['requirements'][0]['status']==='Not completed'
+    && $a['programs'][0]['requirements'][0]['detail']==='Past enrollment is missing a final transcript grade.'
+    && $a['gen_ed'][0]['status']==='Review needed',
     'Missing transcript for a past enrollment was treated as an ordinary unmet requirement.');
 $orphan = array_replace($retry, ['term_start'=>null, 'section_course'=>null]);
 $a = calculateDegreeAudit($profile, $programs, $requirements, [$orphan], [], $genEd);
@@ -266,5 +271,25 @@ $a = calculateDegreeAudit($profile,[],[],[],[],[]);
 check(!$a['diversity']['configured'] && !$a['proficiency']['configured']
     && $a['major_electives']['status']==='Rules unavailable' && $a['free_electives']['status']==='Rules unavailable',
     'An unconfigured block was treated as an unmet rule.');
+$alternate = array_replace($retry, ['crn'=>22, 'code'=>'C2', 'section_course'=>'C2', 'title'=>'Alternative']);
+$current = calculateDegreeAudit($profile, $programs, $requirements, [$retry, $alternate], [], $genEd);
+$unmappedPreview = [['kind'=>'Major','id'=>'Q','name'=>'Preview program','is_primary'=>1,'declared'=>1], $programs[1]];
+$preview = calculateDegreeAudit($profile, $unmappedPreview, $requirements, [$retry, $alternate], [], $genEd);
+$comparison = compareDegreeAuditPreview($current, $preview);
+check(array_column($comparison['still_counts'], 'code') === ['C1']
+    && $comparison['still_counts'][0]['requirements'] === ['Minor', 'Writing (draft)']
+    && $comparison['lost_uses'][0]['requirements'] === ['Program']
+    && $comparison['primary_status'] === 'Rules unavailable'
+    && $preview['credits']['earned_provisional'] === 6 && $preview['credits'] === $current['credits'],
+    'Preview compared catalog options instead of applied evidence, lost a minor or changed total credits.');
+
+$current = calculateDegreeAudit($profile, $programs, $requirements, [$retry, $alternate], [], $genEd, $creditPolicy);
+$cappedPolicy = array_replace($creditPolicy, ['liberal_arts'=>3]);
+$preview = calculateDegreeAudit($profile, $unmappedPreview, $requirements, [$retry, $alternate], [], $genEd, $cappedPolicy);
+$comparison = compareDegreeAuditPreview($current, $preview);
+check(!$comparison['compare_liberal_arts']
+    && $comparison['lost_uses'][0]['requirements'] === ['Program'] && count($comparison['lost_uses']) === 1,
+    'Preview inferred a Liberal Arts course gained or lost from a capped total.');
+
 echo 'PASS: SELECT-only comparisons for '.count($students).' existing students and pure calculation edge cases (no DB fixtures).'.PHP_EOL;
 echo json_encode($coverage,JSON_PRETTY_PRINT).PHP_EOL;

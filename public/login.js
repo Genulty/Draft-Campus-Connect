@@ -276,7 +276,7 @@ function renderStudentOverview(overview, viewId) {
 }
 
 // Student audit: recorded progress is separated from policies the database cannot establish.
-function renderDegreeAudit(audit) {
+function renderDegreeAudit(audit, majorOptions) {
   const root = el('div', 'degree-audit');
   const section = (title, note = null) => {
     const box = el('section', 'audit-section');
@@ -401,6 +401,57 @@ function renderDegreeAudit(audit) {
     panel.append(summary);
     return panel;
   };
+  const preview = audit.preview;
+  if (Object.keys(majorOptions).length) {
+    const controls = section('Preview another major');
+    if (preview) controls.append(el('p', 'audit-student-name', `Previewing ${preview.major_name}. Your major hasn’t changed.`));
+    controls.append(el('p', 'muted audit-note', 'The preview replaces your primary major and keeps any secondary major and minor.'));
+    controls.append(renderBlock({ type: 'filters', filters: [
+      { name: 'preview_major', label: 'Major to preview', value: preview?.major_id ?? '',
+        options: [['', 'Choose a major'], ...Object.entries(majorOptions)] },
+    ] }, 'degree-audit'));
+    if (preview) {
+      const back = el('button', null, 'Back to my current audit');
+      back.type = 'button';
+      back.addEventListener('click', () => openView('degree-audit'));
+      controls.append(back);
+    }
+    root.append(controls);
+  }
+  if (preview) {
+    const addList = (container, items, render) => {
+      const list = el('ul', 'audit-rule-options');
+      for (const item of items) list.append(el('li', null, render(item)));
+      container.append(list);
+    };
+    const courseUses = course => `${course.code} · ${course.title} — ${course.requirements.join(', ')}`;
+    const counts = section('What still counts');
+    if (preview.still_counts.length) addList(counts, preview.still_counts, courseUses);
+    else counts.append(el('p', 'muted audit-note', 'No completed coursework has a mapped use in both audits.'));
+    if (preview.newly_counts.length) {
+      counts.append(el('p', 'audit-rule-meta', 'Newly applied in this preview'));
+      addList(counts, preview.newly_counts, courseUses);
+    }
+    if (preview.lost_uses.length) {
+      counts.append(el('p', 'audit-rule-meta', 'These courses no longer apply to the listed mapped requirements in this preview. Their earned credits stay in your total.'));
+      addList(counts, preview.lost_uses, courseUses);
+    }
+    if (!preview.compare_liberal_arts) {
+      counts.append(el('p', 'muted audit-note', 'The Liberal Arts credit cap prevents a course-by-course comparison for that requirement.'));
+    }
+    const needed = section('What you’d still need');
+    if (preview.primary_status === 'Rules unavailable') {
+      needed.append(auditStatus('Rules unavailable'));
+    } else if (!preview.needed.length) {
+      needed.append(el('p', 'muted audit-note', 'All listed primary major courses are complete.'));
+    }
+    addList(needed, [...preview.needed, ...preview.additional], rule => `${rule.name} · ${rule.status}`);
+    const earned = section('Total credits earned');
+    earned.append(el('p', 'audit-student-name', `${audit.credits.earned_provisional} credits`),
+      el('p', 'muted audit-note', 'Provisional total from your transcript. The preview does not change it.'));
+    root.append(counts, needed, earned);
+  }
+
   const profile = section('Student Academic Profile');
   profile.append(el('p', 'audit-student-name', audit.profile.name));
   const fields = el('dl', 'audit-profile-grid');
@@ -409,7 +460,7 @@ function renderDegreeAudit(audit) {
   for (const [label, value] of [
     ['Student ID', audit.profile.id], ['Student type', audit.profile.type],
     ['Academic year', audit.profile.year], ['Enrollment status', audit.profile.enrollment_status],
-    ['Degree program', majors.map(p => `${p.name}${Number(p.is_primary) ? ' (primary)' : ''}`).join('; ') || 'Not on file'],
+    [preview ? 'Degree program in preview' : 'Degree program', majors.map(p => `${p.name}${Number(p.is_primary) ? ' (primary)' : ''}`).join('; ') || 'Not on file'],
     ['Minor', minors.map(p => p.name).join('; ') || 'None declared'], ['Records checked', audit.profile.as_of],
   ]) {
     const field = el('div'); field.append(el('dt', null, label), el('dd', null, String(value))); fields.append(field);
@@ -658,7 +709,7 @@ function el(tag, className, text) {
 // onFilter: what a filter change does. By default it reloads the dashboard page with the new values.
 function renderBlock(block, viewId, onFilter = (params) => openView(viewId, params)) {
   if (block.type === 'student-overview') return renderStudentOverview(block, viewId);
-  if (block.type === 'degree-audit') return renderDegreeAudit(block.audit);
+  if (block.type === 'degree-audit') return renderDegreeAudit(block.audit, block.major_options ?? {});
   if (block.type === 'stats') {
     const grid = el('div', 'stats');
     for (const item of block.items) {
