@@ -89,8 +89,8 @@ async function openView(id, params = {}, flash = null, historyMode = 'push') {
   // Use the server-validated Master Schedule choices for refreshes and future filter changes.
   if (id === 'master-schedule' && res.ok) {
     const filters = (page.blocks || []).find((b) => b.type === 'filters')?.filters || [];
-    const choices = filters.filter((f) => f.name === 'semester' || f.name === 'dept');
-    if (choices.length === 2) {
+    const choices = filters.filter((f) => f.name === 'semester' || f.name === 'dept' || f.value !== '');
+    if (choices.length >= 2) {
       currentParams = Object.fromEntries(choices.map((f) => [f.name, f.value]));
       history.replaceState(null, '', `#${id}?${new URLSearchParams(currentParams)}`);
     }
@@ -787,6 +787,13 @@ if (block.type === 'empty-major') {
       label.append(select);
       bar.append(label);
     }
+    if (block.clearParams) {
+      const clear = el('button', 'row-action secondary schedule-filter-reset', 'Clear filters');
+      clear.type = 'button';
+      clear.disabled = block.clearDisabled;
+      clear.addEventListener('click', () => onFilter(block.clearParams));
+      bar.append(clear);
+    }
     return bar;
   }
   if (block.type === 'form') {
@@ -916,7 +923,7 @@ item.append(availability);
   card.append(head);
   if (block.note) card.append(el('p', 'muted small note', block.note));
   if (!block.rows.length) {
-    card.append(el('p', 'muted empty-row', 'Nothing to show.'));
+    card.append(el('p', 'muted empty-row', block.emptyText ?? 'Nothing to show.'));
     return card;
   }
   const wrap = el('div', 'table-wrap');

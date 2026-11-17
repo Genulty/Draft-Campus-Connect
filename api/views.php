@@ -1233,6 +1233,16 @@ function masterSchedule(array $q): array
 
     $day = in_array($q['day'] ?? null, ['M', 'T', 'W', 'R', 'F'], true) ? $q['day'] : '';
 
+    $periods = rows("SELECT period_ID, CONCAT('Period ', period_ID, ' · ',
+        TIME_FORMAT(start_Time, '%l:%i %p'), ' – ', TIME_FORMAT(end_Time, '%l:%i %p')) AS label
+        FROM Period ORDER BY start_Time, end_Time, period_ID");
+    $periodId = in_array($q['period'] ?? null, array_map('strval', array_column($periods, 'period_ID')), true) ? $q['period'] : '';
+
+    $buildings = rows("SELECT DISTINCT b.building_ID, b.building_Name FROM Building b
+        JOIN Room r ON r.building_ID = b.building_ID WHERE r.room_Type IN ('Lecture', 'Lab')
+        ORDER BY b.building_Name, b.building_ID");
+    $buildingId = in_array($q['building'] ?? null, array_column($buildings, 'building_ID'), true) ? $q['building'] : '';
+
     $roomOpt = rows("SELECT room_ID FROM Room WHERE room_Type IN ('Lecture', 'Lab') ORDER BY room_ID");
     $roomId = in_array($q['room'] ?? null, array_column($roomOpt, 'room_ID'), true) ? $q['room'] : '';
 
@@ -1243,26 +1253,44 @@ function masterSchedule(array $q): array
             'options' => array_merge([['', 'All faculty']], array_map(fn ($f) => [$f['faculty_ID'], $f['name']], $facOpt))],
         ['name' => 'day', 'label' => 'Day', 'value' => $day,
             'options' => [['', 'Any day'], ['M', 'Monday'], ['T', 'Tuesday'], ['W', 'Wednesday'], ['R', 'Thursday'], ['F', 'Friday']]],
+        ['name' => 'period', 'label' => 'Period', 'value' => $periodId,
+            'options' => [['', 'Any period'], ...array_map(fn ($p) => [(string) $p['period_ID'], $p['label']], $periods)]],
+        ['name' => 'building', 'label' => 'Building', 'value' => $buildingId,
+            'options' => [['', 'All buildings'], ...array_map(fn ($b) => [$b['building_ID'], $b['building_Name']], $buildings)]],
         ['name' => 'room', 'label' => 'Room', 'value' => $roomId,
             'options' => array_merge([['', 'All rooms']], array_map(fn ($r) => [$r['room_ID'], $r['room_ID']], $roomOpt))],
     ]);
 
-    // A day filter matches either the section's lecture meeting or its separate lab meeting.
-    $dayCond = $day !== ''
-        ? "(EXISTS (SELECT 1 FROM Time_Slot_Day d WHERE d.time_Slot_ID = cs.time_Slot_ID AND d.day_ID = ?)
-            OR EXISTS (SELECT 1 FROM Course_Section_Lab l JOIN Time_Slot_Day ld ON ld.time_Slot_ID = l.time_Slot_ID WHERE l.CRN = cs.CRN AND ld.day_ID = ?))"
-        : '1 = 1';
-    $params = [$semester, $deptId, $deptId, $courseId, $courseId, $facId, $facId, $roomId, $roomId, $roomId];
-    if ($day !== '') { $params[] = $day; $params[] = $day; }
+    $hasFilters = $deptId !== '' || $courseId !== '' || $facId !== '' || $day !== '' ||
+        $periodId !== '' || $buildingId !== '' || $roomId !== '';
+    $filters['clearParams'] = ['semester' => $semester];
+    $filters['clearDisabled'] = !$hasFilters;
 
-    return [$filters,
-        table('Course sections', 'SELECT ' . SCHEDULE_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ', ' . LAB_COLUMNS . ', ' . SEATS . '
+    // Require all meeting filters to match the same lecture or the same linked lab.
+    $lecture = $lab = $meetingParams = [];
+    foreach ([
+        [$day, 'EXISTS (SELECT 1 FROM Time_Slot_Day d WHERE d.time_Slot_ID = cs.time_Slot_ID AND d.day_ID = ?)',
+            'EXISTS (SELECT 1 FROM Time_Slot_Day d WHERE d.time_Slot_ID = csl.time_Slot_ID AND d.day_ID = ?)'],
+        [$periodId, 'p.period_ID = ?', 'lp.period_ID = ?'],
+        [$buildingId, 'r.building_ID = ?', 'lr.building_ID = ?'],
+        [$roomId, 'cs.room_ID = ?', 'csl.lab_ID = ?'],
+    ] as [$value, $lectureCondition, $labCondition]) {
+        if ($value === '') continue;
+        $lecture[] = $lectureCondition;
+        $lab[] = $labCondition;
+        $meetingParams[] = $value;
+    }
+    $meetingFilter = $meetingParams
+        ? ' AND ((' . implode(' AND ', $lecture) . ') OR (csl.CRN IS NOT NULL AND ' . implode(' AND ', $lab) . '))'
+        : '';
+    $sections = table('Course sections', 'SELECT ' . SCHEDULE_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ', ' . LAB_COLUMNS . ', ' . SEATS . '
           FROM Course_Section cs ' . SECTION_JOINS . ' ' . LAB_JOINS . "
           WHERE cs.semester_ID = ? AND (? = '' OR c.dept_ID = ?)
             AND (? = '' OR cs.course_ID = ?) AND (? = '' OR cs.faculty_ID = ?)
-            AND (? = '' OR cs.room_ID = ? OR EXISTS (SELECT 1 FROM Course_Section_Lab l WHERE l.CRN = cs.CRN AND l.lab_ID = ?))
-            AND $dayCond
-          ORDER BY cs.course_ID, cs.section_No", $params)];
+          $meetingFilter ORDER BY cs.course_ID, cs.section_No",
+        [$semester, $deptId, $deptId, $courseId, $courseId, $facId, $facId, ...$meetingParams, ...$meetingParams]);
+    if ($hasFilters) $sections['emptyText'] = 'No course sections match these filters.';
+    return [$filters, $sections];
 }
 
 function viewMasterSchedule(array $u, array $q): array
