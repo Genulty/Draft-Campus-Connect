@@ -67,3 +67,16 @@ BIO110's exact four-credit lecture/lab frequency, duration, and shared-CRN arran
 The current model cannot express different periods for different days within one time slot. A three-credit undergraduate slot with multiple period mappings is rejected because it cannot represent exactly the required two meetings. No stored slot relationships were restructured.
 
 Existing historical/noncompliant sections remain unchanged. This change enforces creation-time rules only, not retroactive repairs or protection against direct out-of-application database edits. Existing registration/security deployment limitations remain documented separately.
+
+## UC-13: Create a course section for a catalog course
+
+1. A Read-Write Admin opens **Create Section**, selects the semester and catalog course, and chooses the instructor, meeting pattern, room, and capacity. The instructor list comes from the selected course's department. Changing the course clears an instructor who is no longer eligible. The server checks that same department membership.
+2. **Check conflicts** validates the form without creating a section. **Create section** runs the same validation with the current schedule before saving. The Admin sees all applicable teaching-load, instructor overlap, and room overlap messages together, and the form keeps the selections so they can be corrected.
+3. Teaching load counts assigned parent section CRNs in the selected semester. A full-time instructor may have two assignments and a part-time instructor may have one. A linked lab uses its parent section's assignment and contributes its own actual days, time, and room to the overlap check. A meeting ending exactly when another begins is allowed.
+4. Read-Only Admins can view section data. Preview and save require Admin update permission. A rejected request does not add a section or change section, lab, enrollment, or audit rows.
+
+### Local demo
+
+Start the isolated demo with `bash tests/create-section-live.sh --serve 3006`, then sign in as the seeded Read-Write Admin `300001` and open `http://127.0.0.1:3006/#create-section?semester=SP27`. Select **CS110** and **Carlos Miller**, then switch to **BIO110** to see the Biology faculty list and the cleared selection. Switch back to **CS110**, select **Carlos Miller**, choose **Tuesday/Thursday 9:30–10:50 AM** (slot 9), choose **ACB-103**, and enter **5** seats. **Check conflicts** shows the teaching-load limit, instructor overlap, and room overlap together. **Create section** gives the same three reasons.
+
+Run the full isolated check with `bash tests/create-section-live.sh`. It loads only the checked-in schema and seed data into a new, socket-only MySQL instance. The runner uses PHP, MySQL, Node, Playwright, and Chromium or Chrome via `CHROME_PATH`. The browser makes real API requests and the test checks database state after preview, rejected requests, and successful saves. See [local acceptance evidence](evidence/create-section-local.txt).

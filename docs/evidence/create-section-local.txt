@@ -1,0 +1,35 @@
+UC-13 Create a course section — Passed locally
+Worktree: fix/create-section-workflow
+Baseline: c95c0cf2115628250b043fccf6193a57312aa6e5
+Environment: local PHP on loopback, Chromium, and disposable socket-only MySQL
+The fixture used checked-in schema and seed data. The local fixture clock was frozen
+in November 2026 to keep Spring 2027 upcoming. No hosted service was used.
+
+bash tests/create-section-live.sh — Passed
+  Chromium: Spring 2027 faculty options matched Faculty_Department for CS110 and
+  BIO110. Switching courses cleared the previously selected Carlos Miller.
+  For CS110 / Carlos Miller / slot 9 / ACB-103 / 5 seats, Check conflicts and
+  Create section returned the same three reasons: load limit, faculty overlap
+  with 10551, and room overlap with 10551. Both left the form populated.
+  HTTP/MySQL: Read-Only Admin and Student requests were refused for both preview
+  and save. Invalid preview flag and wrong-department faculty were rejected.
+  A clean preview left rows unchanged. The first and second assignments saved
+  successfully. The second was back-to-back with the first in the same room
+  and appeared in Master Schedule. A third assignment at an otherwise free
+  time and room was rejected. Faculty and room clashes were verified separately
+  for both existing lecture and linked-lab meetings. The linked lab shared its
+  parent assignment. Preview/save returned identical conflict lists. Fingerprints
+  of section, lab, enrollment, and audit rows were unchanged after rejected
+  requests and after previews.
+
+Port 3006 browser walkthrough — Passed on the running local demo using the
+Chromium test's --demo-only mode.
+
+php tests/section-scheduling.php — Passed 79 cases and 12 response fixtures.
+php tests/section-capacity.php — Passed 34 invalid, 8 valid, 6 guard cases.
+php tests/section-scheduling.php --existing-data — Passed 198 SELECT-only
+  combinations using the disposable demo socket. BIO110 CRN 10569 unchanged.
+node tests/section-scheduling-browser.cjs — Passed 8 intercepted submissions.
+node tests/section-capacity-browser.cjs — Passed 9 invalid and 4 valid UI cases.
+PHP lint, JavaScript syntax, Bash syntax, and Git whitespace checks — Passed.
+Concurrent section submissions were not tested in this pass.

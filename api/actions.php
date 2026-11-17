@@ -277,7 +277,10 @@ function createSection(int $adminId, array $form): array
 {
     if (!adminCanUpdate($adminId)) fail('Read-Only admins cannot create course sections.');
 
-    return transaction(function () use ($form) {
+    $checkOnly = array_key_exists('check_only', $form) ? $form['check_only'] : false;
+    if (!is_bool($checkOnly)) fail('The check-only flag must be a boolean.');
+
+    return transaction(function () use ($form, $checkOnly) {
         $capacity = $form['max_Seats'] ?? null;
         // Accept form strings and JSON integers, never coerced floats, booleans, or arrays.
         if ((!is_int($capacity) && !is_string($capacity))
@@ -285,8 +288,9 @@ function createSection(int $adminId, array $form): array
             fail('Section capacity must be a whole number between 5 and 10 students.');
         }
         $seats = (int) $capacity;
-        // Serialize section creation for this semester before taking a snapshot of its meetings.
-        $sem = one('SELECT semester_ID, semester_Name, start_Date <= CURDATE() AS started FROM Semester WHERE semester_ID = ? FOR UPDATE',
+        // A save locks the semester before reading its meetings. A preview only reads the draft.
+        $lock = $checkOnly ? '' : ' FOR UPDATE';
+        $sem = one('SELECT semester_ID, semester_Name, start_Date <= CURDATE() AS started FROM Semester WHERE semester_ID = ?' . $lock,
             [(string) ($form['semester_ID'] ?? '')]);
         if (!$sem) fail('Choose a semester.');
         if ($sem['started']) fail("{$sem['semester_Name']} has already started; sections can only be added to an upcoming semester.");
@@ -318,7 +322,8 @@ function createSection(int $adminId, array $form): array
         $member = one('SELECT 1 AS ok FROM Faculty_Department WHERE faculty_ID = ? AND dept_ID = ?', [$fac['faculty_ID'], $course['dept_ID']]);
         if (!$member) $conflicts[] = "{$fac['name']} is not a member of the {$course['dept_ID']} department.";
 
-        $teaching = rows('SELECT CRN FROM Course_Section WHERE faculty_ID = ? AND semester_ID = ? FOR UPDATE',
+        // A linked lab shares the instructor and CRN of its parent section.
+        $teaching = rows('SELECT CRN FROM Course_Section WHERE faculty_ID = ? AND semester_ID = ?' . $lock,
             [$fac['faculty_ID'], $sem['semester_ID']]);
         $limit = TEACH_LOAD[$fac['faculty_Type']];
         if (count($teaching) >= $limit) {
@@ -326,7 +331,9 @@ function createSection(int $adminId, array $form): array
                 . " section(s) in {$sem['semester_Name']}. Their limit is $limit.";
         }
 
-        rows('SELECT CRN FROM Course_Section WHERE room_ID = ? AND semester_ID = ? FOR UPDATE', [$room['room_ID'], $sem['semester_ID']]);
+        if (!$checkOnly) {
+            rows('SELECT CRN FROM Course_Section WHERE room_ID = ? AND semester_ID = ? FOR UPDATE', [$room['room_ID'], $sem['semester_ID']]);
+        }
         // Check every overlapping lecture or lab and show each affected section once.
         $facultyClashes = rows('SELECT DISTINCT m.CRN, m.course_ID FROM ' . MEETINGS . ' m WHERE m.faculty_ID = ? AND m.semester_ID = ? AND '
             . overlapsAny('m.time_Slot_ID', 1) . ' ORDER BY m.CRN', [$fac['faculty_ID'], $sem['semester_ID'], $slot['time_Slot_ID']]);
@@ -339,6 +346,7 @@ function createSection(int $adminId, array $form): array
             $conflicts[] = "Room {$room['room_ID']} is already used by {$clash['course_ID']} (CRN {$clash['CRN']}) at that time.";
         }
         if ($conflicts) fail(implode("\n", $conflicts));
+        if ($checkOnly) return ['message' => 'No conflicts found. No section was created.'];
 
         $crn = (int) one('SELECT COALESCE(MAX(CRN), 10000) + 1 AS crn FROM Course_Section FOR UPDATE')['crn'];
         $n = (int) one('SELECT COUNT(*) AS n FROM Course_Section WHERE course_ID = ? AND semester_ID = ?',

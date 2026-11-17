@@ -53,7 +53,7 @@ const assert = require('node:assert/strict');
       await form.locator('[name=time_Slot_ID]').selectOption(slot);
       await form.locator('[name=faculty_ID]').selectOption('1');
       await form.locator('[name=max_Seats]').fill('5');
-      await form.locator('button[type=submit]').click();
+      await form.getByRole('button', {name:'Create section', exact:true}).click();
       const result=fixture.cases[course+'/'+slot];
       const message=result.body.error||result.body.message;
       await page.waitForFunction(message=>document.getElementById('page-blocks').textContent.includes(message)&&document.querySelector('#page-blocks form button')?.disabled===false,message);
@@ -65,7 +65,7 @@ const assert = require('node:assert/strict');
       assert.equal(posted.at(-1).max_Seats,'5');
     }
     const count=posted.length;
-    await form.locator('[name=max_Seats]').fill('4');await form.locator('button[type=submit]').click();
+    await form.locator('[name=max_Seats]').fill('4');await form.getByRole('button', {name:'Create section', exact:true}).click();
     assert.equal(posted.length,count,'Capacity constraint no longer blocks invalid browser submission');
     assert.equal(validationResponses.length,3);assert.equal(validationConsole.length,3);
     assert.deepEqual(errors,[]);
