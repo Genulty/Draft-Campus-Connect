@@ -1,0 +1,16 @@
+Admin access-level check, base c95c0cf, disposable MySQL and Chromium
+
+Baseline: Read-Only Admin 300003 received HTTP 200 for student 100014 / CRN 10579 and created an enrollment. Legacy test stopped with undefined adminCanUpdate() in the bootstrap path.
+
+PASS A-R2/A-R3: Admin read views match; browser user/department/section/student lookup works; institutional write controls hidden or disabled.
+PASS A-F2: 12 Admin-only routes denied Read-Only, Student, Faculty, StatDept and anonymous requests; institutional records, reset rows and audit logs unchanged.
+PASS A-R4/A-R6/A-R43/A-R44: same valid update denied for Read-Only and persisted for Read-Write after Chromium refresh; audit entry saved. The browser Save control also saved and kept the selected record.
+PASS create/delete/workflows: Read-Write created a department, placed and removed a hold, registered an eligible student, and cancelled the under-enrolled fixture section with an internal notice. Read-Only and held-student attempts were refused.
+PASS reset gate: Read-Only 403; Read-Write reached the normal delivery-disabled guard. Secure delivery was not tested.
+
+Legacy regression after bootstrap and stale assertion correction:
+PASS: native InnoDB reset-attempt durability/limits, malformed/expired/used/superseded requests, 12 simultaneous wrong-code attempts, 6 simultaneous issuances, 2 simultaneous completions (one succeeds), 8 simultaneous failed logins, session revocation/locks/legacy rejection, role checks, unauthorized inbox, and production recovery shutdown.
+PASS: 38 registration-router regression checks with genuine credential-bound fixture sessions (401/403/422).
+PASS: actual HTTP production fail-closed recovery, owner-only local demo, counter enforcement, role permissions, regenerated session IDs, password-change/lock revocation across sessions, and sanitized logs.
+
+Port 3005 browser lookup and role control smoke passed. The SELECT-only Admin student account suite passed for 240 accounts. PHP, JavaScript and shell syntax and Git whitespace checks passed.

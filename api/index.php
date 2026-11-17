@@ -122,11 +122,8 @@ switch (true) {
             'remove-hold' => ['Admin'], 'update-user-info' => ['Admin'],
         ];
         if (!in_array($user['role'], $allowed[$m[1]] ?? [], true)) respond(403, ['error' => 'Your role cannot do that.']);
-        // Admin security levels (A-R2, A-F2): a Read-Only admin can view records but never change them.
-        // (Every user may still update their own address and password.) register-student is the one
-        // exception: its use case lists plain "Admin, Student" as actors, not "(read-write)", so it is
-        // never gated by security level.
-        if ($allowed[$m[1]] === ['Admin'] && $m[1] !== 'register-student' && !adminCanUpdate((int) $user['id'])) {
+        // A-F2 applies to all Admin-only actions. Own-account actions remain available to every role.
+        if ($allowed[$m[1]] === ['Admin'] && !adminCanUpdate((int) $user['id'])) {
             respond(403, ['error' => 'Your security level is Read-Only: you can view records but not change them.']);
         }
         respond(200, match ($m[1]) {

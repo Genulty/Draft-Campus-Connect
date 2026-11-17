@@ -101,7 +101,7 @@ $_SESSION=['user'=>['id'=>2,'role'=>'Faculty'],'credential_fingerprint'=>credent
 expect(authenticatedSession($_SESSION['user'])===null,'Deleted account session survived');
 
 seed();$results=concurrent('wrong-login',8);
-expect((int)one('SELECT no_Of_Tries FROM Login WHERE user_ID=1')['no_Of_Tries']===5,'Concurrent login attempts lost');
+expect((int)one('SELECT no_Of_Tries FROM Login WHERE user_ID=1')['no_Of_Tries']===MAX_ATTEMPTS,'Concurrent login attempts lost');
 expect(signIn(['email'=>'1','password'=>'FixtureOnly123!','role'=>'Student'])[0]===423,'Locked account signed in');
 seed();[$status,$body]=signIn(['email'=>'1','password'=>'FixtureOnly123!','role'=>'Faculty']);expect($status===403,'Wrong-role login accepted');
 [$status,$body]=signIn(['email'=>'1','password'=>'FixtureOnly123!','role'=>'Student']);expect($status===200 && array_keys($body)===['user'],'Login leaked internal credential binding');

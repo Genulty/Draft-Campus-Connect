@@ -503,11 +503,8 @@ function cancelSection(int $adminId, array $form): array
     });
 }
 
-// ---------- Admin: register a student for a course section on their behalf (UC15/16) ----------
-// The spec lists this use case's actors as plain "Admin, Student" -- unlike every other admin
-// write action above, it is not marked "(read-write)", so no security-level check applies here.
-// index.php's generic security gate carries an explicit exception for this one action; every
-// other registration rule is still checked, by reusing checkAdd() exactly as addSection() does.
+// ---------- Admin: register a student on their behalf ----------
+// The Admin-only route enforces the update level before the same checks used by Student Register.
 function adminRegister(int $adminId, array $form): array
 {
     $studentId = filter_var($form['student_ID'] ?? null, FILTER_VALIDATE_INT);

@@ -20,6 +20,7 @@ if (($argv[2] ?? '')==='initialize') {
     $probe->exec('CREATE DATABASE campus_security_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
     db()->exec(file_get_contents(__DIR__.'/schema.sql'));
 }
+require __DIR__.'/../../api/actions.php';
 require __DIR__.'/../../api/accounts.php';
 require __DIR__.'/../../api/mail.php';
 if (!is_dir($fixtureRoot.'/sessions')) mkdir($fixtureRoot.'/sessions',0700);

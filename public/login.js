@@ -782,7 +782,7 @@ if (block.type === 'empty-major') {
       }
       select.addEventListener('change', () => {
         const params = Object.fromEntries([...bar.querySelectorAll('select')].map((s) => [s.name, s.value]));
-        onFilter(params);
+        onFilter({ ...block.params, ...params });
       });
       label.append(select);
       bar.append(label);
@@ -822,17 +822,20 @@ if (block.type === 'empty-major') {
         if (f.type === 'password') input.autocomplete = 'new-password';
       }
       if (f.required) input.required = true;
+      if (block.disabled && !f.reload) input.disabled = true;
       input.name = f.name;
       label.append(input);
       grid.append(label);
     }
     const button = el('button', 'primary', block.submit);
     button.type = 'submit';
+    button.disabled = Boolean(block.disabled);
     card.append(grid);
     if (block.note) card.append(el('p', 'muted small', block.note));
     card.append(button);
     card.addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (block.disabled) return;
       button.disabled = true;
       const body = Object.fromEntries(new FormData(card));
       // A search form only reloads the page with its values; other forms change the database.
@@ -940,6 +943,7 @@ item.append(availability);
       if (block.action.select) {
         picker = el('select');
         picker.name = block.action.select.name;
+        picker.disabled = Boolean(block.action.disabled);
         const defaultIndex = block.action.select.defaultColumn ? block.columns.indexOf(block.action.select.defaultColumn) : -1;
         const rowDefault = defaultIndex >= 0 ? row[defaultIndex] : null;
         for (const [value, text] of block.action.select.options) {
