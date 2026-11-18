@@ -5,15 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/degree-audit-supplemental.php';
 require_once __DIR__ . '/degree-audit-electives.php';
 
-// The letter-grade order already used by registration and stored requirement checks.
-// Other grading schemes need an explicit policy and remain unclassified here.
-const AUDIT_GRADES = ['F', 'D', 'D+', 'C-', 'C', 'C+', 'B-', 'B', 'B+', 'A-', 'A'];
-
-function auditGradeRank(?string $grade): ?int
-{
-    $rank = array_search($grade, AUDIT_GRADES, true);
-    return $rank === false ? null : $rank;
-}
+require_once __DIR__ . '/academic-standing.php';
 
 function loadDegreeAudit(int $studentId, bool $includeCreditPolicy = true, ?string $previewMajorId = null): ?array
 {
@@ -50,14 +42,7 @@ function loadDegreeAudit(int $studentId, bool $includeCreditPolicy = true, ?stri
         $selected = $choices[$previewMajorId] ?? null;
         if ($selected === null) fail('Choose an undeclared major offered at your academic level.');
     }
-    $history = rows("SELECT h.CRN AS crn, h.course_ID AS code, c.course_Name AS title, c.course_Credits AS credits,
-        h.grade, h.semester_ID AS semester_id, COALESCE(sem.semester_Name, h.semester_ID) AS semester, sem.start_Date AS term_start,
-        cs.course_ID AS section_course, cs.semester_ID AS section_semester,
-        e.course_ID AS enrollment_course, e.grade AS enrollment_grade
-      FROM Student_History h LEFT JOIN Course c ON c.course_ID = h.course_ID
-      LEFT JOIN Semester sem ON sem.semester_ID = h.semester_ID LEFT JOIN Course_Section cs ON cs.CRN = h.CRN
-      LEFT JOIN Enrollment e ON e.student_ID = h.student_ID AND e.CRN = h.CRN
-      WHERE h.student_ID = ? ORDER BY sem.start_Date DESC, h.course_ID, h.CRN", [$studentId]);
+    $history = studentTranscriptAttempts($studentId);
     $enrollments = rows("SELECT e.CRN AS crn, COALESCE(cs.course_ID, e.course_ID) AS code, c.course_Name AS title, c.course_Credits AS credits,
         e.grade, e.course_ID AS enrollment_course, cs.semester_ID AS semester_id,
         COALESCE(sem.semester_Name, cs.semester_ID) AS semester, sem.start_Date, sem.end_Date
@@ -346,24 +331,14 @@ function calculateDegreeAudit(array $profile, array $programs, array $requiremen
     $profile['name'] = trim(implode(' ', array_filter([$profile['first_Name'], $profile['middle_Name'], $profile['last_Name']], static fn ($v) => $v !== null && $v !== '')));
     unset($profile['first_Name'], $profile['middle_Name'], $profile['last_Name']);
     $profile['enrollment_status'] = in_array($profile['enrollment_status'], ['Full-time', 'Part-time'], true) ? $profile['enrollment_status'] : 'Unknown / not on file';
-    $best = $attempts = $earned = $historyByCrn = $reviewCourses = [];
+    $best = $attempts = $historyByCrn = $reviewCourses = [];
     $review = [];
-    foreach ($history as &$attempt) {
+    [$evaluated, $earned] = evaluateTranscriptCredits($history, $profile['as_of']);
+    foreach ($evaluated as $index => [$attempt, $rank, $reason]) {
         $code = $attempt['code'];
         $historyByCrn[$attempt['crn']] = $attempt;
-        $rank = auditGradeRank($attempt['grade']);
-        $consistent = $code === $attempt['section_course'] && $attempt['semester_id'] === $attempt['section_semester']
-            && (($attempt['enrollment_course'] ?? null) === null || $attempt['enrollment_course'] === $code)
-            && ($attempt['enrollment_grade'] === null || $attempt['enrollment_grade'] === $attempt['grade']);
-        $reason = match (true) {
-            $attempt['credits'] === null || $attempt['term_start'] === null || $attempt['section_course'] === null
-                => 'The transcript references a missing course, section, or term.',
-            !$consistent => 'Transcript and section/enrollment records disagree.',
-            $attempt['term_start'] > $profile['as_of'] => 'A transcript grade is recorded for a future term.',
-            $rank === null => 'The transcript grade is unsupported.',
-            default => null,
-        };
         $attempt['result'] = $reason !== null ? 'Review needed' : ($rank > 0 ? 'Passing grade recorded' : 'Not passing');
+        $history[$index] = $attempt;
         $attempts[$code][] = $attempt;
         if ($reason !== null) {
             foreach (array_filter([$code, $attempt['section_course'], $attempt['enrollment_course'] ?? null]) as $affectedCode) {
@@ -374,9 +349,7 @@ function calculateDegreeAudit(array $profile, array $programs, array $requiremen
             continue;
         }
         if (!isset($best[$code]) || $rank > $best[$code]['rank']) $best[$code] = ['rank' => $rank, 'course' => $attempt];
-        if ($rank > 0) $earned[$code] = (int) $attempt['credits'];
     }
-    unset($attempt);
 
     $inProgress = $future = $pending = $activeByCode = $futureByCode = [];
     foreach ($enrollments as $enrollment) {
@@ -463,6 +436,9 @@ function calculateDegreeAudit(array $profile, array $programs, array $requiremen
     $repeats = count(array_filter($attempts, static fn ($list) => count($list) > 1));
     $stored = $profile['stored_credits'];
     $earnedTotal = array_sum($earned);
+    if ($profile['type'] === 'Undergraduate') {
+        $profile['year'] = undergraduateClassYear($earnedTotal);
+    }
     if ($stored !== null && (int) $stored !== $earnedTotal) $review[] = ['code' => null, 'crn' => null, 'semester' => null,
         'reason' => 'Stored student credit total differs from the transcript-derived provisional total; reconciliation policy is unavailable.'];
     $creditRequirements = auditCreditRequirements(

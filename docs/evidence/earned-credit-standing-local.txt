@@ -1,0 +1,106 @@
+Local verification on November 18, 2026. No hosted/shared database checks.
+Base: c95c0cf2115628250b043fccf6193a57312aa6e5.
+Standing-only 3013 fixture uses a December 17, 2026 application clock.
+Baseline 3014 is unchanged main with the same academic rows; read-only GET walkthrough.
+Student compatibility uses the preserved Student patch plus standing and local PR #8/#9/#10 assembly on a second private database (3015).
+
+Unchanged main: old mismatch
+{"id":100018,"baseline":"Senior","earned":50,"correct":"Sophomore","problem":true}
+{"id":100001,"baseline":"Senior","earned":59,"correct":"Junior","problem":true}
+{"id":199088,"baseline":"Freshman","earned":92,"correct":"Senior","problem":true}
+
+Standing-only Chromium/API
+{"totals":{"FA23":16,"SP24":16,"FA24":15,"SP25":15,"FA25":15,"SP26":15},"credits":92,"major":[["CS110","Completed"],["CS115","Completed"],["CS220","Completed"],["CS225","Completed"],["CS330","Completed"],["CS335","Completed"],["CS340","Completed"],["CS445","Not completed"],["CS450","Not completed"],["CS455","In progress"],["CS460","In progress"],["CS470","In progress"],["CS480","In progress"],["MATH360","Completed"]],"current":[["CS455",10442],["CS460",10901],["CS470",10903],["CS480",10902]],"draftBlocks":{"degree_requirements":"In progress","liberal_arts":"Completed","major_electives":"Not started","free_electives":"Not completed","diversity":"Completed","proficiency":"Completed"},"genEd":[["Basic Communication","Completed"],["Humanities","Completed"],["Mathematics","Completed"],["Natural Sciences","Completed"],["Social Science","Completed"],["The American Experience","Completed"],["World History and Cultures","Completed"]]}
+PASS Chromium/API: Student and Admin standing, graduate preservation, and matching Student/Admin denial for Junior attempting a senior-level section.
+
+Degree Audit regression
+PASS: SELECT-only comparisons for 241 existing students and pure calculation edge cases (no DB fixtures).
+{
+    "students": 241,
+    "graduate": 60,
+    "no_history": 79,
+    "repeated_courses": 28,
+    "multiple_majors": 5,
+    "with_minor": 36,
+    "future_enrollment_students": 0
+}
+
+Admin account regression
+PASS: 241 existing student accounts, independent hold associations, input safety, own-account preservation and read-only regressions.
+{
+    "undergraduate_full_time": 130,
+    "undergraduate_part_time": 51,
+    "graduate": 60,
+    "academic": 10,
+    "disciplinary": 3,
+    "both": 0,
+    "neither": 228,
+    "other_holds_only": 30,
+    "missing_or_unexpected_classification": 0
+}
+UNTESTED WITH LIVE DATA: both (no matching existing record).
+UNTESTED WITH LIVE DATA: missing_or_unexpected_classification (no matching existing record).
+
+Faculty PHP regression
+PASS: 608 faculty/semester combinations; all lecture/lab fields match independent SELECTs; six FA26 labs across five faculty; no duplicates, no account/semester leakage, correct section counts, roster membership, attendance/grading panel scope, malformed-filter fallback and role guards.
+{"owner":200029,"CRN":10469,"Course":"BIO110","Days":"F","Time":"8:00 AM – 9:20 AM","Room":"Natural Sciences 105","Instructor":"Priya Singh"}
+{"owner":200030,"CRN":10470,"Course":"BIO115","Days":"F","Time":"1:00 PM – 2:20 PM","Room":"Natural Sciences 106","Instructor":"Michael Adams"}
+{"owner":200025,"CRN":10471,"Course":"BIO220","Days":"F","Time":"9:30 AM – 10:50 AM","Room":"Academic Building 105","Instructor":"Yuki Miller"}
+{"owner":200027,"CRN":10479,"Course":"BIO110","Days":"F","Time":"11:00 AM – 12:20 PM","Room":"Natural Sciences 105","Instructor":"Tyler Davis"}
+{"owner":200027,"CRN":10480,"Course":"BIO115","Days":"F","Time":"9:30 AM – 10:50 AM","Room":"Natural Sciences 105","Instructor":"Tyler Davis"}
+{"owner":200021,"CRN":10481,"Course":"BIO220","Days":"F","Time":"8:00 AM – 9:20 AM","Room":"Academic Building 106","Instructor":"Ryan Hill"}
+PASS: scheduling/assignment/enrollment fingerprints unchanged. SELECT-only: no schema/data changes or transactions. Inherited lab instructor is the recorded parent-section faculty; separate lab assignments are not stored.
+
+Faculty Chromium regression
+PASS: 12 desktop/mobile pages across all five affected faculty plus a no-lab faculty member; all six FA26 labs rendered with exact meeting fields, Lecture/Lab labels, grouping by parent CRN, semester switches/refresh, responsive table scrolling, and no console errors. Real SELECT-only payloads; HTTP intercepted.
+
+Major Preview regression
+PASS: SELECT-only comparisons for 240 existing students and pure calculation edge cases (no DB fixtures).
+{
+    "students": 240,
+    "graduate": 60,
+    "no_history": 79,
+    "repeated_courses": 28,
+    "multiple_majors": 5,
+    "with_minor": 36,
+    "future_enrollment_students": 0
+}
+PASS: SELECT-only comparisons for 240 existing students and pure calculation edge cases (no DB fixtures).
+{
+    "students": 240,
+    "graduate": 60,
+    "no_history": 79,
+    "repeated_courses": 28,
+    "multiple_majors": 5,
+    "with_minor": 36,
+    "future_enrollment_students": 0
+}
+PASS: CS to Economics preview and real change agree, 59 earned credits and transcript unchanged, preserved secondary major and minor, unavailable and invalid rules, unauthenticated rejection, no preview writes.
+
+Registration router guards
+/opt/homebrew/Cellar/mysql/26.10.0_1/bin/mysqld  Ver 26.10.0 for macos26.6 on arm64 (Homebrew)
+PASS: 38 registration-router regression checks with genuine credential-bound fixture sessions (401/403/422).
+
+Student compatibility: matcher
+PASS Chromium/API: personal draft and major labels, unchanged conflict refusals, filter on/off/refresh and department composition, completed and same-term suppression, desktop/mobile wrapping, isolated account parameters, and a valid new alternate matched and added normally.
+
+Student compatibility: standing
+{"totals":{"FA23":16,"SP24":16,"FA24":15,"SP25":15,"FA25":15,"SP26":15},"credits":92,"major":[["CS110","Completed"],["CS115","Completed"],["CS220","Completed"],["CS225","Completed"],["CS330","Completed"],["CS335","Completed"],["CS340","Completed"],["CS445","Not completed"],["CS450","Not completed"],["CS455","In progress"],["CS460","In progress"],["CS470","In progress"],["CS480","In progress"],["MATH360","Completed"]],"current":[["CS455",10442],["CS460",10901],["CS470",10903],["CS480",10902]],"draftBlocks":{"degree_requirements":"In progress","liberal_arts":"Completed","major_electives":"Not started","free_electives":"Not completed","diversity":"Completed","proficiency":"Completed"},"genEd":[["Basic Communication","Completed"],["Humanities","Completed"],["Mathematics","Completed"],["Natural Sciences","Completed"],["Social Science","Completed"],["The American Experience","Completed"],["World History and Cultures","Completed"]]}
+PASS Chromium/API: Student and Admin standing, graduate preservation, and matching Student/Admin denial for Junior attempting a senior-level section.
+
+Student compatibility: acceptance
+PASS UC-01 and UC-05 browser login opens own Overview; anonymous views denied
+PASS UC-02 invalid login denied, account locked after three failures
+PASS UC-06/07/24/26/27 Add, reload, next schedule, cancel or confirm Drop, closed/no-enrollment rejection
+PASS UC-25 S-F3–S-F12 server rejects holds, prerequisites, levels, cap, seats, passed, conflict, and closed Add
+PASS UC-08/09/10/11/12 holds, grades, transcript, draft audit, advisors and empty states
+PASS UC-13–21 catalog/program browsing and prerequisites by ID/title with both no-result cases
+PASS UC-22 S-F14/15/16/17/18 address persistence, immutable ID/email, another student’s reads and writes
+PASS UC-28–41 major/minor add, change, drop, cap, invalid and undeclared; persists after reload
+PASS UC-03/04/23 standard recovery fails closed; local owner-only verification and password update
+PASS UC-03 conditional fixture: locked account remains unable to read mail; fixture-delivered reset link works once
+
+Additional PASS: academic-standing.php pure thresholds/repeat/failure/future/inconsistent/unposted cases; standing-registration.php actual shared Add gate for both preview and locked paths; registration-windows.php and Chromium; registration-locking.php control-flow probes; section-capacity.php and section-scheduling.php database-free guards.
+Default fixture check: 240 seeded students, zero User rows for 199088. Riley was created only with --senior on the other private fixtures.
+Academic fingerprints stayed unchanged across the standing browser checks, including Student, Student_History, Enrollment and Course_Section. Seed accounts 100001 and 100018 were not corrected through data writes.
+NOT TESTED: registration concurrency, production behavior, official graduation eligibility. Full legacy Admin reset suite was not rerun; its separate bootstrap fix belongs to PR #9. Secure delivery remains unverified; Student recovery passes above are fixture-flow evidence only.

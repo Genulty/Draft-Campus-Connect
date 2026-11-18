@@ -363,8 +363,9 @@ function viewRegister(array $u, array $q): array
     $keep = array_map(fn ($c) => array_search($c, $offered['columns'], true), ['CRN', 'Course', 'Title', 'Section']);
     $canAdd = [];
     $cannot = [];
+    $earnedCredits = $me['student_Type'] === 'Undergraduate' && $offered['rows'] ? studentEarnedCredits((int) $u['id']) : null;
     foreach ($offered['rows'] as $row) {
-        $reason = whyCannotAdd($u['id'], (int) $row[$crnAt]);
+        $reason = whyCannotAdd($u['id'], (int) $row[$crnAt], $earnedCredits);
         if ($reason === null) $canAdd[] = $row;
         else $cannot[] = [...array_map(fn ($k) => $row[$k], $keep), $reason];
     }
@@ -531,6 +532,21 @@ function facultyTeachingSchedule(int $facultyId, string $semesterId, string $sem
         'Lecture and Lab are existing meetings of the same course section and share its CRN and recorded instructor. Open seats apply to the parent section.');
 }
 
+// Keep class year consistent in existing student lists without exposing extra record fields.
+function studentListStanding(array $table): array
+{
+    $idColumn = array_search('Student ID', $table['columns'], true);
+    $yearColumn = array_search('Year', $table['columns'], true);
+    foreach ($table['rows'] as &$row) {
+        $student = one('SELECT student_Type FROM Student WHERE student_ID = ?', [(int) $row[$idColumn]]);
+        if ($student['student_Type'] === 'Undergraduate') {
+            $row[$yearColumn] = undergraduateClassYear(studentEarnedCredits((int) $row[$idColumn]));
+        }
+    }
+    unset($row);
+    return $table;
+}
+
 function viewTeaching(array $u, array $q): array
 {
     $f = one("SELECT f.`rank`, f.faculty_Type, f.specialty,
@@ -556,13 +572,13 @@ function viewTeaching(array $u, array $q): array
         facultyTeachingSchedule((int) $u['id'], $selected['semester_ID'], $selected['semester_Name']),
     ];
     foreach ($mine as $s) {
-        $blocks[] = table("Roster: {$s['course_ID']} (CRN {$s['CRN']})", "SELECT u.user_ID AS `Student ID`,
+        $blocks[] = studentListStanding(table("Roster: {$s['course_ID']} (CRN {$s['CRN']})", "SELECT u.user_ID AS `Student ID`,
             CONCAT(u.first_Name, ' ', u.last_Name) AS Student, st.student_Year AS Year, l.user_Email AS Email,
             CONCAT(ROUND(100 * AVG(a.attendance_Status = 'Present')), '%') AS Attendance
           FROM Enrollment e JOIN User u ON u.user_ID = e.student_ID JOIN Student st ON st.student_ID = e.student_ID
           JOIN Login l ON l.user_ID = e.student_ID
           LEFT JOIN Attendance a ON a.CRN = e.CRN AND a.student_ID = e.student_ID
-          WHERE e.CRN = ? GROUP BY u.user_ID, st.student_Year, l.user_Email ORDER BY u.last_Name", [$s['CRN']]);
+          WHERE e.CRN = ? GROUP BY u.user_ID, st.student_Year, l.user_Email ORDER BY u.last_Name", [$s['CRN']]));
 
         // Take attendance: only saves on a day this section actually meets, while its semester is
         // in session (record-attendance checks both; the button is always shown, same as "Try" on
@@ -598,13 +614,13 @@ function viewTeaching(array $u, array $q): array
 function viewAdvisees(array $u, array $q): array
 {
     return ['title' => 'My advisees', 'subtitle' => 'Full-time faculty advise at most 15 students.', 'blocks' => [
-        table('Advisees', "SELECT st.student_ID AS `Student ID`, CONCAT(u.first_Name, ' ', u.last_Name) AS Student,
+        studentListStanding(table('Advisees', "SELECT st.student_ID AS `Student ID`, CONCAT(u.first_Name, ' ', u.last_Name) AS Student,
             st.student_Type AS Level, st.student_Year AS Year,
             (SELECT GROUP_CONCAT(m.major_Name SEPARATOR ', ') FROM Student_Major sm JOIN Major m ON m.major_ID = sm.major_ID WHERE sm.student_ID = st.student_ID) AS Major,
             (SELECT GROUP_CONCAT(h.hold_Type SEPARATOR ', ') FROM Student_Hold sh JOIN Hold h ON h.hold_ID = sh.hold_ID WHERE sh.student_ID = st.student_ID) AS Holds,
             DATE_FORMAT(a.date_Of_Appointment, '%b %e, %Y') AS `Advising since`
           FROM Advisor a JOIN Student st ON st.student_ID = a.student_ID JOIN User u ON u.user_ID = st.student_ID
-          WHERE a.faculty_ID = ? ORDER BY u.last_Name", [$u['id']]),
+          WHERE a.faculty_ID = ? ORDER BY u.last_Name", [$u['id']])),
     ]];
 }
 
@@ -1016,8 +1032,15 @@ function viewAdminRegister(array $u, array $q): array
           FROM Student s JOIN User u ON u.user_ID = s.student_ID WHERE s.student_ID = ?", [$studentId]);
         if ($stu) {
             $cur = currentSemester();
-            $blocks[] = stats([['Student', $stu['name']], ['Type', $stu['student_Type']], ['Year', $stu['student_Year']]]);
-            $blocks[] = studentSchedule("{$cur['name']} schedule", $studentId, $cur['id']);
+            $earned = studentEarnedCredits($studentId);
+            $year = $stu['student_Type'] === 'Undergraduate' ? undergraduateClassYear($earned) : $stu['student_Year'];
+            $currentSchedule = studentSchedule("{$cur['name']} schedule", $studentId, $cur['id']);
+            $courseColumn = array_search('Course', $currentSchedule['columns'], true);
+            $creditColumn = array_search('Credits', $currentSchedule['columns'], true);
+            $currentCredits = array_column($currentSchedule['rows'], $creditColumn, $courseColumn);
+            $blocks[] = stats([['Student', $stu['name']], ['Type', $stu['student_Type']], ['Year', $year],
+                ['Earned credits (provisional)', $earned], ["{$cur['name']} enrolled credits", array_sum($currentCredits)]]);
+            $blocks[] = $currentSchedule;
         } else {
             $blocks[] = ['type' => 'message', 'ok' => false, 'heading' => 'Student not found', 'message' => "No student with ID $studentId was found."];
         }
@@ -1411,6 +1434,8 @@ function adminStudentAccountBlocks(array $me, array $q): array
         default => null,
     };
     $status = in_array($status, ['Full-time', 'Part-time'], true) ? $status : 'Unknown / not on file';
+    $earned = studentEarnedCredits((int) $student['student_ID']);
+    $year = $student['student_Type'] === 'Undergraduate' ? undergraduateClassYear($earned) : $student['student_Year'];
     $hold = static function (string $kind) use ($student): string {
         if ($student[$kind . '_definition'] === null) return 'Unknown (hold type unavailable)';
         return $student[$kind . '_hold'] === null ? 'No record on file' : 'Yes (record on file)';
@@ -1424,7 +1449,8 @@ function adminStudentAccountBlocks(array $me, array $q): array
             ['Student name', trim(implode(' ', array_filter([$student['first_Name'], $student['middle_Name'], $student['last_Name']], static fn ($part) => $part !== null && $part !== '')))],
             ['Campus email', $student['user_Email'] ?? 'Not on file'],
             ['Student type', $student['student_Type']],
-            ['Student year', $student['student_Year']],
+            ['Student year', $year],
+            ['Earned credits (provisional)', $earned],
             ['Enrollment status', $status],
             ['Academic Hold', $hold('academic')],
             ['Academic Hold placed on', $student['academic_date'] !== null ? shortDate($student['academic_date']) : '—'],
