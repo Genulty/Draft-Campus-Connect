@@ -36,6 +36,7 @@ function selectFixture(string $sql, array $params = []): array
 function one(string $sql, array $params = []): ?array
 {
     $GLOBALS['queries'][] = [$sql,$params];
+    if ($sql === 'SELECT CURDATE() AS as_of') return ['as_of' => $GLOBALS['clock']];
     if (str_starts_with($sql, 'SELECT student_ID FROM Student')) return in_array($params[0], [1,2], true) ? ['student_ID'=>$params[0]] : null;
     if (str_starts_with($sql, 'SELECT COUNT(*) AS n FROM (')) return ['n'=>0];
     if (str_starts_with($sql, 'SELECT cs.*') || str_starts_with($sql, 'SELECT e.grade')) return selectFixture($sql, $params)[0] ?? null;
@@ -48,6 +49,7 @@ function one(string $sql, array $params = []): ?array
 }
 function rows(string $sql, array $params = []): array
 {
+    if (str_contains($sql, 'FROM Student_History h LEFT JOIN Course c')) return [];
     if (str_contains($sql, 'FROM Gen_Ed_Requirement r')) return [];
     if (str_contains($sql, 'FROM Semester')) return selectFixture($sql, $params);
     if (str_contains($sql, 'FROM Department')) return [['dept_ID'=>'TEST','dept_Name'=>'Fixture department'], ['dept_ID'=>'OTHER','dept_Name'=>'Other fixture']];

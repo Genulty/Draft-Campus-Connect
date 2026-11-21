@@ -4,6 +4,8 @@
 // written; a broken rule throws a RuleError explaining why.
 declare(strict_types=1);
 
+require_once __DIR__ . '/academic-standing.php';
+
 const GRADE_ORDER = "'F','D','D+','C-','C','C+','B-','B','B+','A-','A'";
 const MAX_CREDITS = ['Full-time' => 16, 'Part-time' => 8];  // S-F7, S-F8
 const TEACH_LOAD = ['Full-time' => 2, 'Part-time' => 1];    // A-F7, A-F8
@@ -57,7 +59,7 @@ function registrationCrn(mixed $value): int
 // ---------- Student: add a course section (S-R22, UC-24/25) ----------
 // Throws a RuleError naming the broken rule, or returns the section label if the student may add it.
 // $lock serializes this student first, then retains section locks for last-seat safety.
-function checkAdd(int $studentId, int $crn, bool $lock): string
+function checkAdd(int $studentId, int $crn, bool $lock, ?int $previewEarnedCredits = null): string
 {
     if ($lock) lockStudentRegistration($studentId);
 
@@ -68,7 +70,7 @@ function checkAdd(int $studentId, int $crn, bool $lock): string
     if (!$sec) fail('That course section does not exist.');
     $label = "{$sec['course_ID']} {$sec['course_Name']} (CRN {$sec['CRN']})";
 
-    $stu = one("SELECT s.student_Type, s.student_Year, COALESCE(u.undergraduate_Student_Type, g.graduate_Student_Type) AS load_type
+    $stu = one("SELECT s.student_Type, COALESCE(u.undergraduate_Student_Type, g.graduate_Student_Type) AS load_type
       FROM Student s LEFT JOIN Undergraduate_Student u ON u.student_ID = s.student_ID
       LEFT JOIN Graduate_Student g ON g.student_ID = s.student_ID WHERE s.student_ID = ?", [$studentId]);
 
@@ -88,8 +90,12 @@ function checkAdd(int $studentId, int $crn, bool $lock): string
         $order = ['Freshman' => 1, 'Sophomore' => 2, 'Junior' => 3, 'Senior' => 4];
         $level = (int) substr(preg_replace('/\D/', '', $sec['course_ID']), 0, 1);
         $minYear = [2 => 'Sophomore', 3 => 'Junior', 4 => 'Senior'][$level] ?? null;
-        if ($minYear !== null && ($order[$stu['student_Year']] ?? 0) < $order[$minYear]) {
-            fail("$label is a {$level}000-level course; you need to be at least a $minYear (you're a {$stu['student_Year']}).");
+        if ($minYear !== null) {
+            $earnedCredits = $lock ? studentEarnedCredits($studentId) : ($previewEarnedCredits ?? studentEarnedCredits($studentId));
+            $year = undergraduateClassYear($earnedCredits);
+            if ($order[$year] < $order[$minYear]) {
+                fail("$label is a {$level}00-level course; you need to be at least a $minYear (you're a $year).");
+            }
         }
     }
     $already = one('SELECT cs.CRN FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN
@@ -134,10 +140,10 @@ function checkAdd(int $studentId, int $crn, bool $lock): string
 }
 
 // The reason a student can't add a section, or null if they can. Used to sort the Register page.
-function whyCannotAdd(int $studentId, int $crn): ?string
+function whyCannotAdd(int $studentId, int $crn, ?int $earnedCredits = null): ?string
 {
     try {
-        checkAdd($studentId, $crn, false);
+        checkAdd($studentId, $crn, false, $earnedCredits);
         return null;
     } catch (RuleError $e) {
         return $e->getMessage();
