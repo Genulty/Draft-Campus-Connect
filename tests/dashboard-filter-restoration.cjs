@@ -19,6 +19,8 @@ function master(params) {
     { type: 'filters', filters: [
       { name: 'semester', label: 'Semester', value: semester, options: [['FA26', 'Fall 2026'], ['SP27', 'Spring 2027']] },
       { name: 'dept', label: 'Department', value: dept, options: [['', 'All departments'], ['CS', 'Computer Science'], ['BIO', 'Biology']] },
+      { name: 'period', label: 'Period', value: params.get('period') === '1' ? '1' : '', options: [['', 'Any period'], ['1', 'Period 1']] },
+      { name: 'building', label: 'Building', value: params.get('building') === 'LIB' ? 'LIB' : '', options: [['', 'All buildings'], ['LIB', 'Library Hall']] },
     ] },
     { type: 'table', title: 'Course sections', columns: ['Fixture selection'], rows: [[`${semester}/${dept || 'ALL'}`]] },
   ] };
@@ -106,6 +108,14 @@ function master(params) {
       const { page } = await setup('Student', hash);
       await expectMaster(page, semester, dept); await page.close();
     }
+    const bookmarked = await setup('Faculty', '#master-schedule?semester=FA26&dept=BIO&period=1&building=LIB&ignored=yes');
+    for (let i = 0; i < 2; i++) {
+      await bookmarked.page.waitForFunction(() => document.querySelector('#page-blocks [name=building]')?.value === 'LIB'
+        && document.querySelector('#page-blocks [name=period]')?.value === '1');
+      assert.equal(await bookmarked.page.evaluate(() => location.hash), '#master-schedule?semester=FA26&dept=BIO&period=1&building=LIB');
+      if (i === 0) await bookmarked.page.reload({ waitUntil: 'domcontentloaded' });
+    }
+    await bookmarked.page.close();
     for (const role of ['Faculty', 'Admin']) {
       const { page } = await setup(role);
       await expectMaster(page, 'SP27', 'CS');
