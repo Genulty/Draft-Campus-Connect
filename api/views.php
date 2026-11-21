@@ -647,7 +647,7 @@ function viewHolds(array $u, array $q): array
 {
     $canUpdate = adminCanUpdate((int) $u['id']);
     $holdTypes = rows('SELECT hold_Type FROM Hold ORDER BY hold_Type');
-    $place = ['type' => 'form', 'title' => 'Place a hold', 'endpoint' => 'place-hold', 'submit' => 'Place hold', 'keep' => true,
+    $place = ['type' => 'form', 'title' => 'Place a hold', 'endpoint' => 'place-hold', 'disabled' => !$canUpdate, 'submit' => 'Place hold', 'keep' => true,
         'note' => $canUpdate ? null : READ_ONLY_NOTICE, 'fields' => [
         ['name' => 'student_ID', 'label' => 'Student ID', 'type' => 'number', 'required' => true, 'value' => ''],
         ['name' => 'hold_Type', 'label' => 'Hold type', 'value' => $holdTypes[0]['hold_Type'] ?? '',
@@ -708,12 +708,12 @@ function viewUpdateUserInfo(array $u, array $q): array
             'placeholder' => '100001 or name@campus.edu']],
         'note' => 'Use this to apply a change a user requested by phone, email, or in person -- e.g. a name correction, a date-of-birth fix, or an address update. Every change is recorded in the Audit Log.',
     ]];
-    if ($term === '') return ['title' => 'Update user information', 'blocks' => $blocks];
+    if ($term === '') return ['title' => 'Update user information', 'subtitle' => $canUpdate ? null : READ_ONLY_NOTICE, 'blocks' => $blocks];
 
     $isId = ctype_digit($term);
     if (!$isId && !filter_var($term, FILTER_VALIDATE_EMAIL)) {
         $blocks[] = ['type' => 'message', 'ok' => false, 'heading' => 'Check the lookup', 'message' => 'Enter a valid user ID or campus email.'];
-        return ['title' => 'Update user information', 'blocks' => $blocks];
+        return ['title' => 'Update user information', 'subtitle' => $canUpdate ? null : READ_ONLY_NOTICE, 'blocks' => $blocks];
     }
     $column = $isId ? 'u.user_ID' : 'l.user_Email';
     $existing = one("SELECT u.user_ID, u.first_Name, u.middle_Name, u.last_Name, u.gender, u.DOB,
@@ -721,12 +721,12 @@ function viewUpdateUserInfo(array $u, array $q): array
       FROM User u LEFT JOIN Login l ON l.user_ID = u.user_ID WHERE $column = ?", [$isId ? (int) $term : $term]);
     if (!$existing) {
         $blocks[] = ['type' => 'message', 'ok' => false, 'heading' => 'User not found', 'message' => 'No user matches that ID or campus email.'];
-        return ['title' => 'Update user information', 'blocks' => $blocks];
+        return ['title' => 'Update user information', 'subtitle' => $canUpdate ? null : READ_ONLY_NOTICE, 'blocks' => $blocks];
     }
     $blocks[] = stats([['Name', trim("{$existing['first_Name']} " . ($existing['middle_Name'] ? "{$existing['middle_Name']} " : '') . $existing['last_Name'])],
         ['Role', $existing['user_Type']], ['Campus email', $existing['user_Email'] ?? 'Not on file']]);
-    $blocks[] = ['type' => 'form', 'title' => "Edit information for {$existing['first_Name']} {$existing['last_Name']} (ID {$existing['user_ID']})",
-        'endpoint' => 'update-user-info', 'submit' => 'Save changes', 'keep' => true,
+    $blocks[] = ['type' => 'form', 'title' => ($canUpdate ? 'Edit information for ' : 'User information for ') . "{$existing['first_Name']} {$existing['last_Name']} (ID {$existing['user_ID']})",
+        'endpoint' => 'update-user-info', 'disabled' => !$canUpdate, 'submit' => 'Save changes',
         'note' => $canUpdate ? 'The ID and campus email cannot be changed here.' : READ_ONLY_NOTICE,
         'fields' => [
             ['name' => 'user_ID', 'label' => 'User ID', 'type' => 'hidden', 'value' => (string) $existing['user_ID']],
@@ -921,7 +921,7 @@ function viewManageDepartments(array $u, array $q): array
             ? 'Adding or updating a department is logged to the Audit Log.'
             : READ_ONLY_NOTICE, 'blocks' => [
         ['type' => 'form', 'title' => $editing ? "Edit {$editing['dept_Name']}" : 'Add a new department',
-            'endpoint' => 'upsert-department', 'submit' => $editing ? 'Save changes' : 'Create department', 'keep' => true,
+            'endpoint' => 'upsert-department', 'disabled' => !$canUpdate, 'submit' => $editing ? 'Save changes' : 'Create department', 'keep' => true,
             'note' => 'Pick an existing department above to edit it; leaving it on "Add a new department" and entering a department ID that does not exist yet creates one.', 'fields' => [
             ['name' => 'edit', 'label' => 'Edit existing department', 'value' => $editId, 'reload' => 'edit',
                 'options' => array_merge([['', '— Add a new department —']],
@@ -970,12 +970,12 @@ function viewEditSection(array $u, array $q): array
         ? "{$editing['semester_Name']} has already started; both actions below will be refused for this section."
         : 'Allowed only before the semester starts.';
     return ['title' => 'Edit a course section', 'subtitle' => $canUpdate ? null : READ_ONLY_NOTICE, 'blocks' => [
-        ['type' => 'form', 'title' => 'Reassign faculty', 'endpoint' => 'reassign-faculty', 'submit' => 'Reassign', 'keep' => true, 'note' => $note, 'fields' => [
+        ['type' => 'form', 'title' => 'Reassign faculty', 'endpoint' => 'reassign-faculty', 'disabled' => !$canUpdate, 'submit' => 'Reassign', 'keep' => true, 'note' => $note, 'fields' => [
             ['name' => 'CRN', 'label' => 'Course section', 'value' => $editCrn, 'reload' => 'CRN', 'options' => $crnOptions],
             ['name' => 'faculty_ID', 'label' => 'New faculty', 'value' => (string) $editing['faculty_ID'],
                 'options' => array_map(fn ($f) => [(string) $f['faculty_ID'], "{$f['name']} ({$f['depts']}, {$f['faculty_Type']})"], $fac)],
         ]],
-        ['type' => 'form', 'title' => 'Change time slot', 'endpoint' => 'update-section-time-slot', 'submit' => 'Change time slot', 'keep' => true, 'note' => $note, 'fields' => [
+        ['type' => 'form', 'title' => 'Change time slot', 'endpoint' => 'update-section-time-slot', 'disabled' => !$canUpdate, 'submit' => 'Change time slot', 'keep' => true, 'note' => $note, 'fields' => [
             ['name' => 'CRN', 'label' => 'Course section', 'value' => $editCrn, 'reload' => 'CRN', 'options' => $crnOptions],
             ['name' => 'time_Slot_ID', 'label' => 'New time slot', 'value' => (string) $editing['time_Slot_ID'],
                 'options' => array_map(fn ($t) => [(string) $t['id'], $t['label']], $slots)],
@@ -1000,17 +1000,29 @@ function viewCancelSections(array $u, array $q): array
 
 // Register a student into a section on their behalf: every constraint checkAdd() uses for the
 // student's own Register page applies here too, so the error (when any fail) names the exact
-// reason, same as the student would see. Not security-level gated -- see adminRegister()'s note.
+// reason, same as the student would see.
 function viewAdminRegister(array $u, array $q): array
 {
+    $canUpdate = adminCanUpdate((int) $u['id']);
     $studentId = filter_var($q['student_ID'] ?? null, FILTER_VALIDATE_INT);
-    $blocks = [
-        ['type' => 'form', 'title' => 'Register a student', 'endpoint' => 'register-student', 'submit' => 'Register', 'keep' => true,
-            'note' => 'Every rule checked for the student\'s own registration is checked here too: hold, add window, prerequisites, seat availability, credit limit, time conflict, course level, and not already passed.', 'fields' => [
-            ['name' => 'student_ID', 'label' => 'Student ID', 'type' => 'number', 'required' => true, 'value' => $studentId !== false ? (string) $studentId : ''],
-            ['name' => 'CRN', 'label' => 'CRN', 'type' => 'number', 'required' => true, 'value' => (string) ($q['CRN'] ?? '')],
-        ]],
+    [$semester, $deptId, $filters] = semesterFilter($q);
+    $studentField = ['name' => 'student_ID', 'label' => 'Student ID', 'type' => 'number', 'required' => true,
+        'value' => $studentId === false ? '' : (string) $studentId];
+    $browseFields = [
+        ['name' => 'semester', 'type' => 'hidden', 'value' => $semester],
+        ['name' => 'dept', 'type' => 'hidden', 'value' => $deptId],
     ];
+    $blocks = [
+        ['type' => 'form', 'title' => 'Find a student schedule', 'method' => 'view', 'submit' => 'Find',
+            'fields' => [$studentField, ...$browseFields]],
+    ];
+    if ($canUpdate) {
+        $crn = filter_var($q['CRN'] ?? null, FILTER_VALIDATE_INT);
+        $blocks[] = ['type' => 'form', 'title' => 'Register a student', 'endpoint' => 'register-student', 'submit' => 'Register', 'keep' => true,
+            'note' => 'Every rule checked for the student’s own registration also applies here.',
+            'fields' => [$studentField, ...$browseFields,
+                ['name' => 'CRN', 'label' => 'CRN', 'type' => 'number', 'required' => true, 'value' => $crn === false ? '' : (string) $crn]]];
+    }
     if ($studentId !== false) {
         $stu = one("SELECT CONCAT(u.first_Name, ' ', u.last_Name) AS name, s.student_Type, s.student_Year
           FROM Student s JOIN User u ON u.user_ID = s.student_ID WHERE s.student_ID = ?", [$studentId]);
@@ -1022,12 +1034,12 @@ function viewAdminRegister(array $u, array $q): array
             $blocks[] = ['type' => 'message', 'ok' => false, 'heading' => 'Student not found', 'message' => "No student with ID $studentId was found."];
         }
     }
-    [$semester, $deptId, $filters] = semesterFilter($q);
+    if ($studentId !== false) $filters['params'] = ['student_ID' => (string) $studentId];
     $blocks[] = $filters;
     $blocks[] = table('Course sections (to find a CRN)', 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ', ' . SEATS . '
       FROM Course_Section cs ' . SECTION_JOINS . " WHERE cs.semester_ID = ? AND (? = '' OR c.dept_ID = ?) ORDER BY cs.course_ID, cs.section_No",
         [$semester, $deptId, $deptId]);
-    return ['title' => 'Register a student (admin-assisted)', 'blocks' => $blocks];
+    return ['title' => 'Register a student (admin-assisted)', 'subtitle' => $canUpdate ? null : READ_ONLY_NOTICE, 'blocks' => $blocks];
 }
 
 // ---------------- Statistics department ----------------
