@@ -882,8 +882,8 @@ function viewCreateSection(array $u, array $q): array
       ORDER BY r.room_ID");
     $v = fn (string $name, string $fallback) => isset($q[$name]) ? (string) $q[$name] : $fallback;
     return ['title' => 'Create a course section', 'blocks' => [
-        ['type' => 'form', 'title' => "New section for {$sem['semester_Name']}", 'endpoint' => 'create-section', 'submit' => 'Create section', 'keep' => true,
-            'note' => 'Capacity: a whole number from 5 to 10 students. Undergraduate courses need at least two distinct meeting days; three-credit undergraduate courses need exactly two 80-minute meetings (160 minutes weekly). Four-credit undergraduate lecture/lab details remain unresolved; no duration or lab requirement is imposed here. Three-credit graduate courses may meet once for 180 minutes; graduate courses are not restricted to once-weekly schedules.', 'fields' => [
+        ['type' => 'form', 'title' => "New section for {$sem['semester_Name']}", 'endpoint' => 'create-section', 'submit' => 'Create section', 'preview' => 'Check conflicts', 'keep' => true,
+            'note' => 'Faculty options follow the selected course’s department. Check conflicts previews validation without saving. Capacity: a whole number from 5 to 10 students. Undergraduate courses need at least two distinct meeting days; three-credit undergraduate courses need exactly two 80-minute meetings (160 minutes weekly). Four-credit undergraduate lecture/lab details remain unresolved; no duration or lab requirement is imposed here. Three-credit graduate courses may meet once for 180 minutes; graduate courses are not restricted to once-weekly schedules.', 'fields' => [
             ['name' => 'semester_ID', 'label' => 'Semester', 'value' => $sem['semester_ID'], 'reload' => 'semester', 'keepOnReload' => true,
                 'options' => array_map(fn ($x) => [$x['semester_ID'], $x['semester_Name']], $sems)],
             ['name' => 'course_ID', 'label' => 'Course', 'value' => $department === null ? '' : $courseId,

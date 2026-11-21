@@ -25,13 +25,13 @@ const path = require('node:path');
       if (value === 'text') await page.locator('[name=max_Seats]').pressSequentially('text');
       assert.equal(await page.locator('[name=max_Seats]').evaluate(el => el.checkValidity()), false, `Accepted ${value}`);
       assert.ok(await page.locator('[name=max_Seats]').evaluate(el => el.validationMessage.length > 0));
-      await page.locator('button').click();
+      await page.getByRole('button', {name:'Create section', exact:true}).click();
       assert.equal(await page.evaluate(() => submissions.length), 0, `Submitted invalid ${value}`);
     }
     for (const value of ['5', '6', '9', '10']) {
       await mount();
       await page.locator('[name=max_Seats]').fill(value);
-      await page.locator('button').click();
+      await page.getByRole('button', {name:'Create section', exact:true}).click();
       const last = await page.evaluate(() => submissions.at(-1));
       assert.equal(last.endpoint, 'create-section');
       assert.equal(last.body.max_Seats, value);

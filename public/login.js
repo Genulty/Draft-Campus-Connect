@@ -832,17 +832,26 @@ if (block.type === 'empty-major') {
     button.disabled = Boolean(block.disabled);
     card.append(grid);
     if (block.note) card.append(el('p', 'muted small', block.note));
-    card.append(button);
+    const preview = block.preview ? el('button', null, block.preview) : null;
+    if (preview) {
+      preview.type = 'submit';
+      const actions = el('div', 'filters');
+      actions.append(button, preview);
+      card.append(actions);
+    } else {
+      card.append(button);
+    }
     card.addEventListener('submit', async (e) => {
       e.preventDefault();
       if (block.disabled) return;
       button.disabled = true;
+      if (preview) preview.disabled = true;
       const body = Object.fromEntries(new FormData(card));
       // A search form only reloads the page with its values; other forms change the database.
       if (block.method === 'view') return openView(viewId, body);
       // Only forms that ask for it keep their values after saving (never passwords).
       if (block.keep) currentParams = { semester: body.semester_ID, ...body };
-      await runAction(block.endpoint, body);
+      await runAction(block.endpoint, preview && e.submitter === preview ? { ...body, check_only: true } : body);
     });
     return card;
   }
