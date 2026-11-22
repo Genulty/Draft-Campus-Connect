@@ -5,7 +5,8 @@ const socket=process.argv[2];
 assert.match(socket,/\/campus-student-review-db\.[A-Za-z0-9]+\/mysql\.sock$/);
 const sql=q=>execFileSync('mysql',['--no-defaults','--protocol=socket','--socket='+socket,'-uroot','-NBr','campus_connect'],{input:q,encoding:'utf8'}).trim();
 assert.equal(sql('SELECT @@skip_networking AND @@server_id=732156'),'1');
-const base='http://127.0.0.1:3012',password=process.env.DEMO_PASSWORD;
+const base=process.env.REGISTER_BASE || 'http://127.0.0.1:3012',password=process.env.DEMO_PASSWORD;
+assert.match(base, /^http:\/\/(localhost|127\.0\.0\.1):\d+$/);
 assert.ok(password);
 const data=async(res,status=200)=>{assert.equal(res.status(),status,await res.text());return res.json();};
 const table=(v,name)=>v.blocks.find(b=>b.title===name);
@@ -34,7 +35,7 @@ async function run(){
   assert.equal(stats.items.find(i=>i.label==='Registered credits').value,'9 of 16');
   const blocked=table(initial,"Sections you can't add");
   const at=blocked.columns.indexOf('Requirement match');
-  assert.equal(blocked.columns[at-1],'Course');
+  assert.equal(blocked.columns[at-1],'Prerequisites');
   for(const crn of [10931,10932]){
    const row=blocked.rows.find(r=>r[0]===crn);
    assert.equal(row[at],'Draft Gen Ed match · World History and Cultures');
@@ -103,7 +104,7 @@ async function run(){
   assert.equal(alternate.rows.find(r=>r[0]===newCrn)[alternate.columns.indexOf('Requirement match')],
    'Draft Gen Ed match · World History and Cultures');
   await p.reload();
-  const row=cards('Sections you can add').getByRole('row').filter({has:p.getByRole('cell',{name:String(newCrn),exact:true})});
+  const row=cards('Sections you can add').locator(`tr[data-crn="${newCrn}"]`);
   const pending=p.waitForResponse(r=>r.url().endsWith('/api/actions/add-section'));
   await row.getByRole('button',{name:'Add',exact:true}).click();
   await data(await pending);

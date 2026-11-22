@@ -164,11 +164,7 @@ function checkAdd(int $studentId, int $crn, bool $lock, ?int $previewEarnedCredi
       JOIN Semester s ON s.semester_ID = cs.semester_ID WHERE e.student_ID = ? AND cs.course_ID = ? AND e.grade IS NULL',
         [$studentId, $sec['course_ID']]);
     if ($inProgress) fail("You are already taking {$sec['course_ID']} in {$inProgress['semester_Name']}.");
-    $missing = rows('SELECT cp.prerequisite_Course_ID AS id, cp.min_Grade_Req AS min FROM Course_Prerequisite cp
-      WHERE cp.course_ID = ? AND NOT EXISTS (
-        SELECT 1 FROM Student_History h JOIN Course_Section hc ON hc.CRN = h.CRN
-        WHERE h.student_ID = ? AND hc.course_ID = cp.prerequisite_Course_ID
-          AND FIELD(h.grade, ' . GRADE_ORDER . ') >= FIELD(cp.min_Grade_Req, ' . GRADE_ORDER . '))', [$sec['course_ID'], $studentId]);
+    $missing = missingRegistrationPrerequisites($studentId, $sec['course_ID']);
     if ($missing) {
         fail('Missing prerequisite ' . implode(', ', array_map(fn ($m) => "{$m['id']} (grade {$m['min']} or better)", $missing)) . '.');
     }
@@ -193,6 +189,17 @@ function checkAdd(int $studentId, int $crn, bool $lock, ?int $previewEarnedCredi
         [$studentId, $sec['semester_ID'], ...$newSlots]);
     if ($clash) fail("$label meets at the same time as {$clash['course_ID']} (CRN {$clash['CRN']}).");
     return $label;
+}
+
+// Shared missing-prerequisite evidence for validation and the read-only Register explanation.
+function missingRegistrationPrerequisites(int $studentId, string $courseId): array
+{
+    return rows('SELECT cp.prerequisite_Course_ID AS id, cp.min_Grade_Req AS min, c.course_Name AS title FROM Course_Prerequisite cp
+      JOIN Course c ON c.course_ID = cp.prerequisite_Course_ID
+      WHERE cp.course_ID = ? AND NOT EXISTS (
+        SELECT 1 FROM Student_History h JOIN Course_Section hc ON hc.CRN = h.CRN
+        WHERE h.student_ID = ? AND hc.course_ID = cp.prerequisite_Course_ID
+          AND FIELD(h.grade, ' . GRADE_ORDER . ') >= FIELD(cp.min_Grade_Req, ' . GRADE_ORDER . '))', [$courseId, $studentId]);
 }
 
 // The reason a student can't add a section, or null if they can. Used to sort the Register page.

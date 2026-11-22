@@ -1,0 +1,35 @@
+Student Register layout — local evidence, 2026-11-22
+Base: 7eb6afb9e762c54c523e53a3a8d8903a55bd535e plus reconciled Student patch.
+Branch: feature/student-register-layout; demo http://localhost:3020/#register?semester=SP27
+All final checks below exited 0. No hosted/shared database was used.
+
+PASS Student acceptance: bash tests/student-acceptance.sh
+PASS Registration windows: php tests/registration-windows.php
+PASS Window browser: node tests/registration-windows-browser.cjs
+PASS Standing: php tests/academic-standing.php
+PASS Standing Add: php tests/standing-registration.php
+PASS Requirement matching: php tests/registration-requirements.php
+PASS Locking: php tests/registration-locking.php
+PASS Degree Audit: php tests/degree-audit.php
+PASS Admin registration: php tests/admin-student-accounts.php
+PASS Faculty: php tests/faculty-lab-visibility.php
+PASS Faculty browser: node tests/faculty-lab-visibility-browser.cjs
+PASS Admin access: bash tests/admin-access.sh
+PASS Create Section: bash tests/create-section-live.sh
+PASS Capacity: php tests/section-capacity.php
+PASS Scheduling: php tests/section-scheduling.php
+PASS Major preview: bash tests/degree-audit-major-preview.sh
+PASS Security: node tests/security/run.cjs
+PASS register-layout-browser.cjs: node tests/register-layout-browser.cjs <private-socket>
+PASS registration-requirements-browser.cjs: node tests/registration-requirements-browser.cjs <private-socket>
+PASS student-review-integration.cjs: node tests/student-review-integration.cjs <private-socket>
+
+Browser evidence: 1440/1024/390px; no document/card horizontal overflow; labeled mobile fields; exact catalog-major and draft Gen Ed text; missing BIO220 Cell Biology and BIO225 Ecology (D); raw API restriction agreement, no Try or blocked-row action; rejected requests preserve schedules and seats. Reference 100001=59/Junior and 100018=50/Sophomore, their histories/enrollments unchanged. New full-time Economics adds 3/6/9/13, then 16 and rejects above cap. Linked lab, matches suppression, filters and refresh persist.
+
+Initial failures: empty-state text was not separately selectable; corrected by restoring its text span and rerunning the window browser and Student acceptance. New test had a transient null during filter rerender; corrected the wait to handle that state and reran. No final failures remain. Test expectations retain API refusals and disabled-action coverage; no eligibility rule was relaxed.
+
+Only private fixture data was added: newly created test accounts and one NEW Biology account copying existing 100001 posted evidence to exercise existing multiple prerequisites. Full-section probe seat count restored. Temporary HIST110 alternate removed by the matcher test. No reference records or catalog mappings changed; no 181-profile reconstruction was loaded.
+
+Preservation: 137 source hashes and staged/unstaged diffs on 3017 unchanged; 114 source hashes and staged/unstaged diffs on 3019 unchanged. Reconciled source patch SHA256 cdf603f881cee37aae9afcae42530a4baf0580becc69bc6868223b07797d61ca unchanged.
+
+Syntax and exact-diff whitespace results accompany this packet. Secure password delivery and joint cohort/concurrency readiness are not verified. Draft curriculum mappings and missing program rules remain unapproved/unavailable. No commit, push, merge or deployment.
