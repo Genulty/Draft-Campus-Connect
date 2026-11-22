@@ -37,6 +37,7 @@ function one(string $sql, array $params = []): ?array
 {
     $GLOBALS['queries'][] = [$sql,$params];
     if ($sql === 'SELECT CURDATE() AS as_of') return ['as_of' => $GLOBALS['clock']];
+    if (str_starts_with($sql, 'SELECT s.student_ID AS id')) return null; // This fixture has no audit profile.
     if (str_starts_with($sql, 'SELECT student_ID FROM Student')) return in_array($params[0], [1,2], true) ? ['student_ID'=>$params[0]] : null;
     if (str_starts_with($sql, 'SELECT COUNT(*) AS n FROM (')) return ['n'=>0];
     if (str_starts_with($sql, 'SELECT cs.*') || str_starts_with($sql, 'SELECT e.grade')) return selectFixture($sql, $params)[0] ?? null;
@@ -53,7 +54,10 @@ function rows(string $sql, array $params = []): array
     if (str_contains($sql, 'FROM Gen_Ed_Requirement r')) return [];
     if (str_contains($sql, 'FROM Semester')) return selectFixture($sql, $params);
     if (str_contains($sql, 'FROM Department')) return [['dept_ID'=>'TEST','dept_Name'=>'Fixture department'], ['dept_ID'=>'OTHER','dept_Name'=>'Other fixture']];
-    if (str_contains($sql, 'FROM Student_Hold') || str_contains($sql, 'FROM Course_Prerequisite')) return [];
+    foreach (['Student_Hold', 'Course_Prerequisite', 'Course_Program_Restriction',
+        'Gen_Ed_Requirement_Course', 'Major_Course_Requirement', 'Degree_Audit_Elective_Course'] as $table) {
+        if (str_contains($sql, 'FROM ' . $table)) return [];
+    }
     throw new RuntimeException('Unexpected rows(): ' . $sql);
 }
 function run(string $sql, array $params = []): object
@@ -72,7 +76,8 @@ function run(string $sql, array $params = []): object
     } else {
         $GLOBALS['queries'][] = [$sql, $params];
         $crn = (int) selectFixture('SELECT CRN FROM Course_Section WHERE semester_ID = ? ORDER BY CRN LIMIT 1', [$params[0]])[0]['CRN'];
-        $list = [[$crn,'TEST100','Isolated test course','001']];
+        $emptyDepartment = str_contains($sql, 'AND c.dept_ID = ?') && $params[2] === 'OTHER';
+        $list = $emptyDepartment ? [] : [[$crn,'TEST100','Isolated test course','001']];
     }
     return new class($columns, $list) {
         public function __construct(private array $columns, private array $list) {}
@@ -140,6 +145,20 @@ foreach (['both-open'=>'2027-02-01','drop-only'=>'2027-02-02','last-drop-day'=>'
 }
 $clock='2027-02-02';
 $pages['no-enrollments']=viewRegister(['id'=>2,'role'=>'Student'],['semester'=>'SP27']);
+$clock = '2027-02-01';
+$pages['empty-department'] = viewRegister($user, ['semester'=>'SP27','dept'=>'OTHER']);
+$all = $pages['both-open']['blocks'];
+$other = $pages['empty-department']['blocks'];
+check($all[0]['filters'][1]['value'] === '', 'All Departments must be the default');
+check($all[0]['filters'][1]['options'][0] === ['', 'All Departments'], 'Missing All Departments option');
+check($all[1] === $other[1] && $all[2] === $other[2], 'Department filter changed semester credits or schedule');
+check($other[3]['empty']['text'] === 'No eligible sections in Other fixture', 'Wrong department empty message');
+check($other[3]['empty']['params'] === ['semester'=>'SP27','dept'=>''], 'Recovery must preserve the semester');
+foreach (['unknown', ['TEST']] as $invalidDept) {
+    $page = viewRegister($user, ['semester'=>'SP27', 'dept'=>$invalidDept]);
+    check($page['blocks'][0]['filters'][1]['value'] === '', 'Invalid department must fall back to All Departments');
+}
+$clock = '2027-02-02';
 foreach (['bogus','FA26', ['SP27']] as $requested) {
     $page=viewRegister($user,['semester'=>$requested,'dept'=>'OTHER']);
     check($page['blocks'][0]['filters'][0]['value']==='SP27', 'Invalid/closed selection must safely fall back');

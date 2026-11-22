@@ -1,0 +1,10 @@
+PASS UC-01 and UC-05 browser login opens own Overview; anonymous views denied
+PASS UC-02 invalid login denied, account locked after three failures
+PASS UC-06/07/24/26/27 Add, reload, next schedule, cancel or confirm Drop, closed/no-enrollment rejection
+PASS UC-25 S-F3–S-F12 server rejects holds, prerequisites, levels, cap, seats, passed, conflict, and closed Add
+PASS UC-08/09/10/11/12 holds, grades, transcript, draft audit, advisors and empty states
+PASS UC-13–21 catalog/program browsing and prerequisites by ID/title with both no-result cases
+PASS UC-22 S-F14/15/16/17/18 address persistence, immutable ID/email, another student’s reads and writes
+PASS UC-28–41 major/minor add, change, drop, cap, invalid and undeclared; persists after reload
+PASS UC-03/04/23 standard recovery fails closed; local owner-only verification and password update
+PASS UC-03 conditional fixture: locked account remains unable to read mail; fixture-delivered reset link works once

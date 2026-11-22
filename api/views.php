@@ -4,6 +4,8 @@
 // filters, a form or a table. The browser draws them (public/login.js).
 declare(strict_types=1);
 
+require_once __DIR__ . '/registration-requirements.php';
+
 // A table block: column names come from the query's column aliases.
 function table(string $title, string $sql, array $params = [], ?string $note = null): array
 {
@@ -336,10 +338,12 @@ function viewRegister(array $u, array $q): array
     $status = !$addOpen ? 'Registration closed — drops still permitted.'
         : ($dropOpen ? 'Adding and dropping are permitted.' : 'Adding permitted — drop period closed.');
     $depts = departments();
+    $departmentNames = array_column($depts, 'dept_Name', 'dept_ID');
     $me = one('SELECT COALESCE(ug.undergraduate_Student_Type, g.graduate_Student_Type) AS load_type,
         s.student_Type FROM Student s LEFT JOIN Undergraduate_Student ug ON ug.student_ID = s.student_ID
         LEFT JOIN Graduate_Student g ON g.student_ID = s.student_ID WHERE s.student_ID = ?', [$u['id']]);
-    $deptId = in_array($q['dept'] ?? null, array_column($depts, 'dept_ID'), true) ? $q['dept'] : '';
+    $requestedDept = $q['dept'] ?? '';
+    $deptId = is_string($requestedDept) && isset($departmentNames[$requestedDept]) ? $requestedDept : '';
     $load = $me['load_type'];
     $credits = one('SELECT COALESCE(SUM(c.course_Credits), 0) AS n FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN
       JOIN Course c ON c.course_ID = cs.course_ID WHERE e.student_ID = ? AND cs.semester_ID = ?', [$u['id'], $sem['semester_ID']]);
@@ -347,7 +351,8 @@ function viewRegister(array $u, array $q): array
       WHERE sh.student_ID = ?", [$u['id']]);
 
     $mine = studentSchedule("My {$sem['semester_Name']} registration", $u['id'], $sem['semester_ID']);
-    $mine['action'] = ['label' => 'Drop', 'endpoint' => 'drop-section', 'column' => 'CRN', 'style' => 'danger', 'disabled' => !$dropOpen];
+    $mine['action'] = ['label' => 'Drop', 'endpoint' => 'drop-section', 'column' => 'CRN',
+        'style' => 'danger', 'disabled' => !$dropOpen, 'confirm' => 'Drop this section from your registration?'];
     if (!$dropOpen) $mine['note'] = 'The drop period is closed. Existing registrations cannot be dropped.';
     $offered = table('Sections you can add', 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ', ' . LAB_COLUMNS . ', ' . SEATS . ",
         COALESCE((SELECT GROUP_CONCAT(cp.prerequisite_Course_ID SEPARATOR ', ') FROM Course_Prerequisite cp WHERE cp.course_ID = c.course_ID), '—') AS Prerequisites
@@ -356,11 +361,25 @@ function viewRegister(array $u, array $q): array
         AND cs.CRN NOT IN (SELECT CRN FROM Enrollment WHERE student_ID = ?)
       ORDER BY cs.course_ID, cs.section_No',
         [$sem['semester_ID'], $me['student_Type'], ...($deptId === '' ? [] : [$deptId]), $u['id']],
-        'These sections are eligible for your current schedule. Each add rechecks eligibility.');
+        'These sections are eligible for your current schedule. Each add rechecks eligibility. Draft requirement matches need academic approval.');
+
+    $audit = loadDegreeAudit((int) $u['id'], false);
+    $requirementMatches = $audit ? registrationRequirementMatches($audit, $sem['semester_ID']) : [];
+    $unmetOnly = ($q['unmet'] ?? '') === '1';
+    $courseAt = array_search('Course', $offered['columns'], true);
+    array_splice($offered['columns'], $courseAt + 1, 0, ['Requirement match']);
+    foreach ($offered['rows'] as &$row) {
+        array_splice($row, $courseAt + 1, 0, [$requirementMatches[$row[$courseAt]] ?? null]);
+    }
+    unset($row);
+    if ($unmetOnly) {
+        $offered['rows'] = array_values(array_filter($offered['rows'],
+            static fn ($row) => isset($requirementMatches[$row[$courseAt]])));
+    }
 
     // The filter affects candidates only. Validation always sees the full semester schedule.
     $crnAt = array_search('CRN', $offered['columns'], true);
-    $keep = array_map(fn ($c) => array_search($c, $offered['columns'], true), ['CRN', 'Course', 'Title', 'Section']);
+    $keep = array_map(fn ($c) => array_search($c, $offered['columns'], true), ['CRN', 'Course', 'Requirement match', 'Title', 'Section']);
     $canAdd = [];
     $cannot = [];
     $earnedCredits = $me['student_Type'] === 'Undergraduate' && $offered['rows'] ? studentEarnedCredits((int) $u['id']) : null;
@@ -372,7 +391,7 @@ function viewRegister(array $u, array $q): array
     $planning = $addOpen && $me['student_Type'] === 'Undergraduate' ? registrationPlanning($u['id'], $sem) : null;
     if ($planning !== null && $canAdd) {
         $courseAt = array_search('Course', $offered['columns'], true);
-        $suggestions = $planning['suggestions'];
+        $suggestions = array_intersect_key($planning['suggestions'], $requirementMatches);
         $rank = static fn ($row) => $suggestions[$row[$courseAt]]['order'] ?? PHP_INT_MAX;
         usort($canAdd, static fn ($a, $b) => $rank($a) <=> $rank($b));
         if ($rank($canAdd[0]) !== PHP_INT_MAX) {
@@ -383,15 +402,25 @@ function viewRegister(array $u, array $q): array
             unset($row);
         }
         $offered['note'] .= ' Check with your advisor for a term-by-term major plan.';
-    } elseif (!$canAdd && $addOpen && $deptId !== '') {
-        $offered['note'] = 'No eligible sections in this department. Choose All Departments to look for other options.';
     }
     $available = array_merge($offered, ['rows' => $canAdd, 'action' => ['label' => 'Add', 'endpoint' => 'add-section', 'column' => 'CRN', 'disabled' => !$addOpen]]);
+    if (!$canAdd && $deptId !== '') {
+        $available['empty'] = [
+            'text' => "No eligible sections in {$departmentNames[$deptId]}",
+            'button' => 'Show all departments',
+            'params' => ['semester' => $sem['semester_ID'], 'dept' => '', ...($unmetOnly ? ['unmet' => '1'] : [])],
+        ];
+    }
+    if (!$canAdd && $unmetOnly && $deptId === '') {
+        $available['emptyText'] = 'No addable sections match an unmet requirement for this term.';
+    }
     $blocked = ['type' => 'table', 'title' => "Sections you can't add",
-        'note' => $addOpen ? 'Each one breaks a registration rule. Try sends the request anyway, so you can see it refused.'
+        'note' => $addOpen ? 'Each section lists the rule that currently blocks it.'
             : 'The add period is closed. These sections cannot be added.',
         'columns' => [...array_map(fn ($k) => $offered['columns'][$k], $keep), 'Reason'], 'rows' => $cannot,
         'action' => ['label' => 'Try', 'endpoint' => 'add-section', 'column' => 'CRN', 'style' => 'secondary', 'disabled' => !$addOpen]];
+    if ($unmetOnly && !$cannot) $blocked['emptyText'] = 'No blocked sections match an unmet requirement for this term.';
+
 
     $registered = (int) $credits['n'];
     $loadStats = [['Registered credits', "$registered of " . (MAX_CREDITS[$load] ?? '—')]];
@@ -409,6 +438,8 @@ function viewRegister(array $u, array $q): array
                 'options' => array_map(fn ($x) => [$x['semester_ID'], $x['semester_Name']], $open)],
             ['name' => 'dept', 'label' => 'Department', 'value' => $deptId,
                 'options' => [['', 'All Departments'], ...array_map(fn ($d) => [$d['dept_ID'], $d['dept_Name']], $depts)]],
+            ['name' => 'unmet', 'label' => 'Requirement matches', 'value' => $unmetOnly ? '1' : '',
+                'options' => [['', 'All courses'], ['1', 'Fulfills an unmet requirement']]],
         ]],
         stats([...$loadStats, ['Active holds', $holds['list'] ?: 'None'],
             ['Add period', shortDate($sem['add_Start']) . ' – ' . shortDate($sem['add_End'])],

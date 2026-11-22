@@ -56,6 +56,61 @@ function registrationCrn(mixed $value): int
     return (int) $value;
 }
 
+// Optional catalog modules have no mappings until their schema is installed.
+function registrationCatalogRows(string $sql, array $params): array
+{
+    try {
+        return rows($sql, $params);
+    } catch (PDOException $error) {
+        if ($error->getCode() !== '42S02') throw $error;
+        return [];
+    }
+}
+
+function checkCourseProgram(int $studentId, string $courseId, string $courseType): void
+{
+    $programs = registrationCatalogRows("SELECT m.major_Name, n.minor_Name,
+        (r.major_ID = s.major_ID OR sm.major_ID IS NOT NULL OR sn.minor_ID IS NOT NULL) AS allowed
+      FROM Course_Program_Restriction r
+      JOIN Student s ON s.student_ID = ?
+      LEFT JOIN Major m ON m.major_ID = r.major_ID
+      LEFT JOIN Minor n ON n.minor_ID = r.minor_ID
+      LEFT JOIN Student_Major sm ON sm.student_ID = s.student_ID AND sm.major_ID = r.major_ID
+        AND sm.date_Of_Choice <= CURDATE()
+      LEFT JOIN Student_Minor sn ON sn.student_ID = s.student_ID AND sn.minor_ID = r.minor_ID
+        AND sn.date_Of_Choice <= CURDATE()
+      WHERE r.course_ID = ? ORDER BY m.major_Name, n.minor_Name", [$studentId, $courseId]);
+    if ($programs) {
+        foreach ($programs as $program) {
+            if ($program['allowed']) return;
+        }
+        $names = array_map(static fn ($program) => $program['major_Name'] !== null
+            ? $program['major_Name'] . ' (major)' : $program['minor_Name'] . ' (minor)', $programs);
+        fail('This course is only open to students in these programs: ' . implode(', ', $names) . '.');
+    }
+
+    if ($courseType !== 'Undergraduate' || registrationCatalogRows(
+        'SELECT 1 FROM Gen_Ed_Requirement_Course WHERE course_ID = ? LIMIT 1', [$courseId]
+    )) return;
+
+    $required = rows('SELECT major_ID FROM Major_Course_Requirement WHERE course_ID = ?', [$courseId]);
+    $electives = registrationCatalogRows("SELECT pm.major_ID
+      FROM Degree_Audit_Elective_Course ec
+      JOIN Degree_Audit_Elective_Rule er USING (program_ID, elective_Type)
+      JOIN Degree_Audit_Program_Major pm USING (program_ID)
+      WHERE ec.course_ID = ? AND er.elective_Type = 'MAJOR' AND er.is_Draft = FALSE", [$courseId]);
+    $catalogMajors = array_column([...$required, ...$electives], 'major_ID');
+    if (!$catalogMajors) return;
+
+    // Major_Course_Requirement also covers any supporting course recorded as a major requirement.
+    $declared = rows('SELECT major_ID FROM Student WHERE student_ID = ?
+      UNION SELECT major_ID FROM Student_Major WHERE student_ID = ? AND date_Of_Choice <= CURDATE()',
+        [$studentId, $studentId]);
+    if (!array_intersect($catalogMajors, array_column($declared, 'major_ID'))) {
+        fail("You can’t add $courseId. This class isn’t open to your major.");
+    }
+}
+
 // ---------- Student: add a course section (S-R22, UC-24/25) ----------
 // Throws a RuleError naming the broken rule, or returns the section label if the student may add it.
 // $lock serializes this student first, then retains section locks for last-seat safety.
@@ -84,6 +139,7 @@ function checkAdd(int $studentId, int $crn, bool $lock, ?int $previewEarnedCredi
             ? 'Undergraduates cannot register for graduate courses.'
             : 'Graduate students cannot register for undergraduate courses.');
     }
+    checkCourseProgram($studentId, $sec['course_ID'], $sec['course_Type']);
     // A course's level (the thousands digit of its number) sets the minimum standing to take it:
     // 1000-level is open to anyone, 2000 needs Sophomore+, 3000 needs Junior+, 4000 needs Senior+.
     if ($sec['course_Type'] === 'Undergraduate') {
