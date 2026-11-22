@@ -151,7 +151,7 @@ async function run() {
         assert.match(bio110[biology.columns.indexOf('Requirement match')], /Natural Sciences/);
         assert.ok(bio110[biology.columns.indexOf('Lab time')]);
         const offered = page.locator('.table-card').filter({ has: page.getByRole('heading', { name: 'Sections you can add', exact: true }) });
-        const row = offered.getByRole('row').filter({ has: page.getByRole('cell', { name: '10579', exact: true }) });
+        const row = offered.locator('tr[data-crn="10579"]');
         const accepted = page.waitForResponse(r => r.url().endsWith('/api/actions/add-section'));
         await row.getByRole('button', { name: 'Add', exact: true }).click();
         assert.equal((await accepted).status(), 200);

@@ -351,11 +351,15 @@ function viewRegister(array $u, array $q): array
       WHERE sh.student_ID = ?", [$u['id']]);
 
     $mine = studentSchedule("My {$sem['semester_Name']} registration", $u['id'], $sem['semester_ID']);
+    $mine['layout'] = 'registration';
     $mine['action'] = ['label' => 'Drop', 'endpoint' => 'drop-section', 'column' => 'CRN',
         'style' => 'danger', 'disabled' => !$dropOpen, 'confirm' => 'Drop this section from your registration?'];
     if (!$dropOpen) $mine['note'] = 'The drop period is closed. Existing registrations cannot be dropped.';
     $offered = table('Sections you can add', 'SELECT ' . SECTION_COLUMNS . ', ' . INSTRUCTOR . ', ' . TIME_ROOM . ', ' . LAB_COLUMNS . ', ' . SEATS . ",
-        COALESCE((SELECT GROUP_CONCAT(cp.prerequisite_Course_ID SEPARATOR ', ') FROM Course_Prerequisite cp WHERE cp.course_ID = c.course_ID), '—') AS Prerequisites
+        COALESCE((SELECT GROUP_CONCAT(CONCAT(cp.prerequisite_Course_ID, ' · ', pc.course_Name,
+            ' (', cp.min_Grade_Req, ' or better)') ORDER BY cp.prerequisite_Course_ID SEPARATOR '\n')
+          FROM Course_Prerequisite cp JOIN Course pc ON pc.course_ID = cp.prerequisite_Course_ID
+          WHERE cp.course_ID = c.course_ID), '—') AS Prerequisites
       FROM Course_Section cs " . SECTION_JOINS . ' ' . LAB_JOINS . '
       WHERE cs.semester_ID = ? AND c.course_Type = ?' . ($deptId === '' ? '' : ' AND c.dept_ID = ?') . '
         AND cs.CRN NOT IN (SELECT CRN FROM Enrollment WHERE student_ID = ?)
@@ -367,9 +371,11 @@ function viewRegister(array $u, array $q): array
     $requirementMatches = $audit ? registrationRequirementMatches($audit, $sem['semester_ID']) : [];
     $unmetOnly = ($q['unmet'] ?? '') === '1';
     $courseAt = array_search('Course', $offered['columns'], true);
-    array_splice($offered['columns'], $courseAt + 1, 0, ['Requirement match']);
+    $prerequisiteAt = array_search('Prerequisites', $offered['columns'], true);
+    $matchAt = $prerequisiteAt === false ? count($offered['columns']) : $prerequisiteAt + 1;
+    array_splice($offered['columns'], $matchAt, 0, ['Requirement match']);
     foreach ($offered['rows'] as &$row) {
-        array_splice($row, $courseAt + 1, 0, [$requirementMatches[$row[$courseAt]] ?? null]);
+        array_splice($row, $matchAt, 0, [$requirementMatches[$row[$courseAt]] ?? null]);
     }
     unset($row);
     if ($unmetOnly) {
@@ -379,15 +385,22 @@ function viewRegister(array $u, array $q): array
 
     // The filter affects candidates only. Validation always sees the full semester schedule.
     $crnAt = array_search('CRN', $offered['columns'], true);
-    $keep = array_map(fn ($c) => array_search($c, $offered['columns'], true), ['CRN', 'Course', 'Requirement match', 'Title', 'Section']);
     $canAdd = [];
     $cannot = [];
+    $restrictionDetails = [];
     $earnedCredits = $me['student_Type'] === 'Undergraduate' && $offered['rows'] ? studentEarnedCredits((int) $u['id']) : null;
     foreach ($offered['rows'] as $row) {
         $reason = whyCannotAdd($u['id'], (int) $row[$crnAt], $earnedCredits);
         if ($reason === null) $canAdd[] = $row;
-        else $cannot[] = [...array_map(fn ($k) => $row[$k], $keep), $reason];
+        else {
+            $cannot[] = [...$row, $reason];
+            if (str_starts_with($reason, 'Missing prerequisite ')) {
+                $restrictionDetails[(string) $row[$crnAt]] = missingRegistrationPrerequisites((int) $u['id'], $row[$courseAt]);
+            }
+        }
     }
+    $blockedColumns = [...$offered['columns'], 'Reason'];
+    $offered['layout'] = 'registration';
     $planning = $addOpen && $me['student_Type'] === 'Undergraduate' ? registrationPlanning($u['id'], $sem) : null;
     if ($planning !== null && $canAdd) {
         $courseAt = array_search('Course', $offered['columns'], true);
@@ -417,8 +430,8 @@ function viewRegister(array $u, array $q): array
     $blocked = ['type' => 'table', 'title' => "Sections you can't add",
         'note' => $addOpen ? 'Each section lists the rule that currently blocks it.'
             : 'The add period is closed. These sections cannot be added.',
-        'columns' => [...array_map(fn ($k) => $offered['columns'][$k], $keep), 'Reason'], 'rows' => $cannot,
-        'action' => ['label' => 'Try', 'endpoint' => 'add-section', 'column' => 'CRN', 'style' => 'secondary', 'disabled' => !$addOpen]];
+        'layout' => 'registration', 'columns' => $blockedColumns, 'rows' => $cannot,
+        'prerequisitesNeeded' => $restrictionDetails];
     if ($unmetOnly && !$cannot) $blocked['emptyText'] = 'No blocked sections match an unmet requirement for this term.';
 
 

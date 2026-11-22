@@ -83,7 +83,7 @@ async function run() {
       await open(page,'register','Register for Spring 2027');
       assert.equal(await page.locator('select[name=dept]').inputValue(),'');
       const canAdd=page.locator('.table-card').filter({has:page.getByRole('heading',{name:'Sections you can add',exact:true})});
-      const findRow=card=>card.getByRole('row').filter({has:page.getByRole('cell',{name:'10579',exact:true})});
+      const findRow=card=>card.locator('tr[data-crn="10579"]');
       const clicked=page.waitForResponse(r=>r.url().endsWith('/api/actions/add-section'));
       await findRow(canAdd).getByRole('button',{name:'Add',exact:true}).click();
       await expectResponse(await clicked,200,/Added BIO110/);

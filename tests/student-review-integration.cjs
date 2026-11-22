@@ -6,7 +6,8 @@ const socket=process.argv[2];
 assert.match(socket,/\/campus-student-review-db\.[A-Za-z0-9]+\/mysql\.sock$/);
 const sql=q=>execFileSync('mysql',['--no-defaults','--protocol=socket','--socket='+socket,'-uroot','-NBr','campus_connect'],{input:q,encoding:'utf8'}).trim();
 assert.equal(sql('SELECT @@skip_networking AND @@server_id=732156'),'1');
-const base='http://127.0.0.1:3012';
+const base=process.env.REGISTER_BASE || 'http://127.0.0.1:3012';
+assert.match(base, /^http:\/\/(localhost|127\.0\.0\.1):\d+$/);
 const data=async(r,status=200)=>{assert.equal(r.status(),status,await r.text());return r.json();};
 async function run(){
  const browser=await chromium.launch({executablePath:process.env.CHROME_PATH});
@@ -30,7 +31,7 @@ async function run(){
  const plans=[];
  for(const [crn,credits]of[[10611,3],[10555,3],[10612,3],[10579,4]]){
   const table=p.locator('.table-card').filter({has:p.getByRole('heading',{name:'Sections you can add',exact:true})});
-  const row=table.getByRole('row').filter({has:p.getByRole('cell',{name:String(crn),exact:true})});
+  const row=table.locator(`tr[data-crn="${crn}"]`);
   await row.getByRole('cell').filter({hasText:'Draft Gen Ed match'}).waitFor();
   const request=p.waitForResponse(r=>r.url().endsWith('/api/actions/add-section'));
   await row.getByRole('button',{name:'Add',exact:true}).click();

@@ -572,3 +572,40 @@ button.ghost:hover { background: rgba(255,255,255,.08); }
 
 /* Personalized Register labels stay readable beside each course. */
 td.requirement-match { white-space: normal; min-width: 14rem; max-width: 24rem; overflow-wrap: anywhere; }
+
+/* Register groups course and meeting data instead of forcing every field into a column. */
+.registration-table { min-width: 0; }
+.registration-table table { width: 100%; table-layout: fixed; }
+.registration-table th, .registration-table td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; padding: 12px 10px; }
+.registration-table th { font-size: .75rem; }
+.registration-table td { font-size: .8125rem; line-height: 1.5; }
+.registration-table th:first-child { width: 21%; }
+.registration-table th:nth-child(2) { width: 20%; }
+.registration-table th:nth-child(3):not(:last-child) { width: 7%; }
+.registration-table th:last-child { width: 19%; }
+.registration-table .registration-code, .registration-title, .registration-meta, .registration-match { display: block; }
+.registration-table .registration-code { color: #193b6d; font-size: .9375rem; }
+.registration-title { margin: 2px 0 5px; }
+.registration-meta { color: #53617a; font-size: .75rem; margin-top: 4px; }
+.registration-meeting { display: grid; margin-bottom: 8px; }
+.registration-meeting strong { font-size: .75rem; }
+.registration-table td.requirement-match { min-width: 0; max-width: none; }
+.registration-match + .registration-match { margin-top: 8px; }
+.registration-prerequisites { white-space: pre-line; }
+.registration-restriction { color: #7b3038; }
+.registration-full { color: #7b3038; font-weight: 600; }
+.registration-needed { margin: 5px 0 0; padding-left: 16px; }
+.registration-needed li + li { margin-top: 5px; }
+.registration-table .row-action { min-height: 40px; }
+@media (max-width: 1050px) {
+  .registration-table table, .registration-table tbody { display: block; }
+  .registration-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .registration-table tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; padding: 16px; border-top: 1px solid #e3e7ef; }
+  .registration-table tbody td { display: block; padding: 0; border: 0; min-width: 0; }
+  .registration-table td::before { content: attr(data-label); display: block; font-size: .6875rem; text-transform: uppercase; letter-spacing: .035em; font-weight: 600; color: #53617a; margin-bottom: 4px; }
+}
+@media (max-width: 600px) {
+  .registration-table tbody tr { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .registration-table .table-head { align-items: start; gap: 8px; }
+  .registration-table td { font-size: .875rem; }
+}
