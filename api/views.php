@@ -1079,17 +1079,23 @@ function viewStats(array $u, array $q): array
         (SELECT SUM(max_Seats) FROM Course_Section WHERE semester_ID = ?) AS seats,
         (SELECT COUNT(*) FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN WHERE cs.semester_ID = ?) AS filled",
         [$cur['id'], $cur['id'], $cur['id']]);
+    $gradeColumns = 'COUNT(*) AS Grades, ROUND(AVG(' . GPA_POINTS . "), 2) AS `Avg grade points`,
+        SUM(h.grade LIKE 'A%') AS A, SUM(h.grade LIKE 'B%') AS B, SUM(h.grade LIKE 'C%') AS C,
+        SUM(h.grade LIKE 'D%') AS D, SUM(h.grade = 'F') AS F";
+    $overall = one('SELECT ROUND(AVG(' . GPA_POINTS . '), 2) AS gpa, COUNT(*) AS n FROM Student_History h');
     return ['title' => "Welcome, {$u['name']}", 'subtitle' => 'Aggregate data only: no student is identified.', 'blocks' => [
-        stats([['Undergraduate students', $c['ug']], ['Graduate students', $c['gr']], ['Full-time faculty', $c['ft']], ['Part-time faculty', $c['pt']],
+        stats([['Overall grade average (all departments)', $overall['n'] ? number_format((float) $overall['gpa'], 2) . ' / 4.00' : '—'], ['Undergraduate students', $c['ug']], ['Graduate students', $c['gr']], ['Full-time faculty', $c['ft']], ['Part-time faculty', $c['pt']],
             ["{$cur['name']} sections", $c['sections']], ["{$cur['name']} seats filled", "{$c['filled']} of {$c['seats']}"]]),
         table('Students per major', 'SELECT m.major_Name AS Major, COUNT(sm.student_ID) AS Students
           FROM Major m LEFT JOIN Student_Major sm ON sm.major_ID = m.major_ID GROUP BY m.major_ID, m.major_Name ORDER BY Students DESC'),
-        table('Grades by department', 'SELECT d.dept_Name AS Department, COUNT(*) AS Grades,
-            ROUND(AVG(' . GPA_POINTS . "), 2) AS `Avg grade points`,
-            SUM(h.grade LIKE 'A%') AS A, SUM(h.grade LIKE 'B%') AS B, SUM(h.grade LIKE 'C%') AS C,
-            SUM(h.grade LIKE 'D%') AS D, SUM(h.grade = 'F') AS F
-          FROM Student_History h JOIN Course_Section cs ON cs.CRN = h.CRN JOIN Course c ON c.course_ID = cs.course_ID
-          JOIN Department d ON d.dept_ID = c.dept_ID GROUP BY d.dept_ID, d.dept_Name ORDER BY d.dept_Name"),
+        // Every department, then all departments together as the last row.
+        table('Grades by department', "SELECT Department, Grades, `Avg grade points`, A, B, C, D, F FROM (
+            SELECT 0 AS sort_Key, d.dept_Name AS Department, $gradeColumns
+              FROM Student_History h JOIN Course_Section cs ON cs.CRN = h.CRN JOIN Course c ON c.course_ID = cs.course_ID
+              JOIN Department d ON d.dept_ID = c.dept_ID GROUP BY d.dept_ID, d.dept_Name
+            UNION ALL
+            SELECT 1, 'All departments', $gradeColumns FROM Student_History h
+          ) g ORDER BY sort_Key, Department", [], 'Grade points: A = 4.0, B = 3.0, C = 2.0, D = 1.0, F = 0 (plus and minus grades in between).'),
     ]];
 }
 
