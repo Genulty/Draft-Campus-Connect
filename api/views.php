@@ -1079,6 +1079,7 @@ function viewStats(array $u, array $q): array
         (SELECT SUM(max_Seats) FROM Course_Section WHERE semester_ID = ?) AS seats,
         (SELECT COUNT(*) FROM Enrollment e JOIN Course_Section cs ON cs.CRN = e.CRN WHERE cs.semester_ID = ?) AS filled",
         [$cur['id'], $cur['id'], $cur['id']]);
+    $gradePoints = GPA_POINTS;
     $gradeColumns = 'COUNT(*) AS Grades, ROUND(AVG(' . GPA_POINTS . "), 2) AS `Avg grade points`,
         SUM(h.grade LIKE 'A%') AS A, SUM(h.grade LIKE 'B%') AS B, SUM(h.grade LIKE 'C%') AS C,
         SUM(h.grade LIKE 'D%') AS D, SUM(h.grade = 'F') AS F";
@@ -1088,11 +1089,16 @@ function viewStats(array $u, array $q): array
             ["{$cur['name']} sections", $c['sections']], ["{$cur['name']} seats filled", "{$c['filled']} of {$c['seats']}"]]),
         table('Students per major', 'SELECT m.major_Name AS Major, COUNT(sm.student_ID) AS Students
           FROM Major m LEFT JOIN Student_Major sm ON sm.major_ID = m.major_ID GROUP BY m.major_ID, m.major_Name ORDER BY Students DESC'),
-        // Every department, then all departments together as the last row.
+        // All 10 departments (a department with no grades yet shows 0 and —), then all departments together.
         table('Grades by department', "SELECT Department, Grades, `Avg grade points`, A, B, C, D, F FROM (
-            SELECT 0 AS sort_Key, d.dept_Name AS Department, $gradeColumns
-              FROM Student_History h JOIN Course_Section cs ON cs.CRN = h.CRN JOIN Course c ON c.course_ID = cs.course_ID
-              JOIN Department d ON d.dept_ID = c.dept_ID GROUP BY d.dept_ID, d.dept_Name
+            SELECT 0 AS sort_Key, d.dept_Name AS Department, COUNT(h.grade) AS Grades,
+                IF(COUNT(h.grade) = 0, '—', ROUND(AVG(IF(h.grade IS NULL, NULL, $gradePoints)), 2)) AS `Avg grade points`,
+                COALESCE(SUM(h.grade LIKE 'A%'), 0) AS A, COALESCE(SUM(h.grade LIKE 'B%'), 0) AS B,
+                COALESCE(SUM(h.grade LIKE 'C%'), 0) AS C, COALESCE(SUM(h.grade LIKE 'D%'), 0) AS D,
+                COALESCE(SUM(h.grade = 'F'), 0) AS F
+              FROM Department d LEFT JOIN Course c ON c.dept_ID = d.dept_ID
+              LEFT JOIN Course_Section cs ON cs.course_ID = c.course_ID LEFT JOIN Student_History h ON h.CRN = cs.CRN
+              GROUP BY d.dept_ID, d.dept_Name
             UNION ALL
             SELECT 1, 'All departments', $gradeColumns FROM Student_History h
           ) g ORDER BY sort_Key, Department", [], 'Grade points: A = 4.0, B = 3.0, C = 2.0, D = 1.0, F = 0 (plus and minus grades in between).'),
