@@ -56,6 +56,44 @@ function registrationCrn(mixed $value): int
     return (int) $value;
 }
 
+// Optional catalog modules have no mappings until their schema is installed.
+function registrationCatalogRows(string $sql, array $params): array
+{
+    try {
+        return rows($sql, $params);
+    } catch (PDOException $error) {
+        if ($error->getCode() !== '42S02') throw $error;
+        return [];
+    }
+}
+
+function checkCourseProgram(int $studentId, string $courseId, string $courseType): void
+{
+    $programs = registrationCatalogRows("SELECT m.major_Name, n.minor_Name,
+        (r.major_ID = s.major_ID OR sm.major_ID IS NOT NULL OR sn.minor_ID IS NOT NULL) AS allowed
+      FROM Course_Program_Restriction r
+      JOIN Student s ON s.student_ID = ?
+      LEFT JOIN Major m ON m.major_ID = r.major_ID
+      LEFT JOIN Minor n ON n.minor_ID = r.minor_ID
+      LEFT JOIN Student_Major sm ON sm.student_ID = s.student_ID AND sm.major_ID = r.major_ID
+        AND sm.date_Of_Choice <= CURDATE()
+      LEFT JOIN Student_Minor sn ON sn.student_ID = s.student_ID AND sn.minor_ID = r.minor_ID
+        AND sn.date_Of_Choice <= CURDATE()
+      WHERE r.course_ID = ? ORDER BY m.major_Name, n.minor_Name", [$studentId, $courseId]);
+    if ($programs) {
+        foreach ($programs as $program) {
+            if ($program['allowed']) return;
+        }
+        $names = array_map(static fn ($program) => $program['major_Name'] !== null
+            ? $program['major_Name'] . ' (major)' : $program['minor_Name'] . ' (minor)', $programs);
+        fail('This course is only open to students in these programs: ' . implode(', ', $names) . '.');
+    }
+
+    // A requirement/elective mapping describes degree use, not exclusive access.
+    // With no explicit catalog restriction, apply the normal registration checks.
+
+}
+
 // ---------- Student: add a course section (S-R22, UC-24/25) ----------
 // Throws a RuleError naming the broken rule, or returns the section label if the student may add it.
 // $lock serializes this student first, then retains section locks for last-seat safety.
@@ -84,6 +122,7 @@ function checkAdd(int $studentId, int $crn, bool $lock, ?int $previewEarnedCredi
             ? 'Undergraduates cannot register for graduate courses.'
             : 'Graduate students cannot register for undergraduate courses.');
     }
+    checkCourseProgram($studentId, $sec['course_ID'], $sec['course_Type']);
     // A course's level (the thousands digit of its number) sets the minimum standing to take it:
     // 1000-level is open to anyone, 2000 needs Sophomore+, 3000 needs Junior+, 4000 needs Senior+.
     if ($sec['course_Type'] === 'Undergraduate') {
@@ -108,11 +147,7 @@ function checkAdd(int $studentId, int $crn, bool $lock, ?int $previewEarnedCredi
       JOIN Semester s ON s.semester_ID = cs.semester_ID WHERE e.student_ID = ? AND cs.course_ID = ? AND e.grade IS NULL',
         [$studentId, $sec['course_ID']]);
     if ($inProgress) fail("You are already taking {$sec['course_ID']} in {$inProgress['semester_Name']}.");
-    $missing = rows('SELECT cp.prerequisite_Course_ID AS id, cp.min_Grade_Req AS min FROM Course_Prerequisite cp
-      WHERE cp.course_ID = ? AND NOT EXISTS (
-        SELECT 1 FROM Student_History h JOIN Course_Section hc ON hc.CRN = h.CRN
-        WHERE h.student_ID = ? AND hc.course_ID = cp.prerequisite_Course_ID
-          AND FIELD(h.grade, ' . GRADE_ORDER . ') >= FIELD(cp.min_Grade_Req, ' . GRADE_ORDER . '))', [$sec['course_ID'], $studentId]);
+    $missing = missingRegistrationPrerequisites($studentId, $sec['course_ID']);
     if ($missing) {
         fail('Missing prerequisite ' . implode(', ', array_map(fn ($m) => "{$m['id']} (grade {$m['min']} or better)", $missing)) . '.');
     }
@@ -137,6 +172,17 @@ function checkAdd(int $studentId, int $crn, bool $lock, ?int $previewEarnedCredi
         [$studentId, $sec['semester_ID'], ...$newSlots]);
     if ($clash) fail("$label meets at the same time as {$clash['course_ID']} (CRN {$clash['CRN']}).");
     return $label;
+}
+
+// Shared missing-prerequisite evidence for validation and the read-only Register explanation.
+function missingRegistrationPrerequisites(int $studentId, string $courseId): array
+{
+    return rows('SELECT cp.prerequisite_Course_ID AS id, cp.min_Grade_Req AS min, c.course_Name AS title FROM Course_Prerequisite cp
+      JOIN Course c ON c.course_ID = cp.prerequisite_Course_ID
+      WHERE cp.course_ID = ? AND NOT EXISTS (
+        SELECT 1 FROM Student_History h JOIN Course_Section hc ON hc.CRN = h.CRN
+        WHERE h.student_ID = ? AND hc.course_ID = cp.prerequisite_Course_ID
+          AND FIELD(h.grade, ' . GRADE_ORDER . ') >= FIELD(cp.min_Grade_Req, ' . GRADE_ORDER . '))', [$courseId, $studentId]);
 }
 
 // The reason a student can't add a section, or null if they can. Used to sort the Register page.

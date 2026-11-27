@@ -1,0 +1,30 @@
+HISTORICAL LOCAL REHEARSAL EVIDENCE — predates the current-main publication run.
+See student-registration-publication.txt for the exact review-commit checks.
+
+PASS Student 100014: BIO110 CRN 10579 (Natural Sciences) added across departments; persisted at 4 of 16 after reload and browsing filters.
+PASS Student 100001: CS → Economics preview wrote no academic rows; actual major change matched the preview after refresh, with the same transcript and 59 earned credits.
+PASS Faculty schedule: Period and Building separately and together, exact same-meeting behavior for CRN 10469, empty result, and Clear filters retained Fall 2026.
+PASS Faculty grade: 200059 saved ENG110 B+ for 100014; Student transcript displayed it after refresh. Unassigned grading and Faculty private academic views remained closed.
+PASS Admin: Read-Only disabled and API 403; Read-Write displayed three conflicts and then saved ENG110 CRN 10947 with Aaron Patel; visible in Spring 2027 Master Schedule.
+Additional executed checks on the same code:
+PASS Register requirement-matching browser/API suite on 3012.
+PASS fresh CS, English and Economics registration browser/API suite on 3012.
+PASS Admin-created Economics student 117148 reached 13 credits while the
+program credit target remained Rules unavailable before/after refresh.
+PASS Student acceptance fixture, including standard recovery failing closed.
+PASS Admin access fixture, including all 12 write-route permission checks.
+PASS Create Section live fixture with combined conflicts and successful saves.
+PASS Degree Audit Major Preview fixture, with transcript and earned-credit
+preservation and unavailable program rules.
+The first three checks used the same 3012 database. The existing regression
+runners provisioned their own private databases using the same code.
+PASS final personalized matcher and registration-window PHP regressions.
+PASS final registration-window Chromium regression (external Playwright module
+path configured; the initial attempt without NODE_PATH could not load it).
+PASS registration locking control-flow probes; concurrent InnoDB execution was
+not tested by those probes.
+PASS changed PHP lint, JavaScript and shell syntax checks; Git whitespace check.
+PASS existing native InnoDB security suite and 38 registration-router checks.
+Security fixture concurrency passed for recovery and login operations only;
+concurrent course registrations remain unverified. Secure deployment password
+delivery is still Blocked; local simulated recovery is not delivery proof.
