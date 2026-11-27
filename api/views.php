@@ -1280,9 +1280,16 @@ function masterSchedule(array $q): array
 
     $day = in_array($q['day'] ?? null, ['M', 'T', 'W', 'R', 'F'], true) ? $q['day'] : '';
 
-    $periods = rows("SELECT period_ID, CONCAT('Period ', period_ID, ' · ',
-        TIME_FORMAT(start_Time, '%l:%i %p'), ' – ', TIME_FORMAT(end_Time, '%l:%i %p')) AS label
-        FROM Period ORDER BY start_Time, end_Time, period_ID");
+    $periods = rows("SELECT p.period_ID, CONCAT('Period ', p.period_ID, ' · ',
+        TIME_FORMAT(p.start_Time, '%l:%i %p'), ' – ', TIME_FORMAT(p.end_Time, '%l:%i %p')) AS label
+        FROM Period p WHERE EXISTS (
+          SELECT 1 FROM (
+            SELECT semester_ID, time_Slot_ID FROM Course_Section
+            UNION ALL
+            SELECT cs.semester_ID, lab.time_Slot_ID FROM Course_Section_Lab lab JOIN Course_Section cs USING (CRN)
+          ) meeting JOIN Time_Slot_Period tp ON tp.time_Slot_ID = meeting.time_Slot_ID
+          WHERE meeting.semester_ID = ? AND tp.period_ID = p.period_ID
+        ) ORDER BY CAST(p.period_ID AS UNSIGNED), p.period_ID", [$semester]);
     $periodId = in_array($q['period'] ?? null, array_map('strval', array_column($periods, 'period_ID')), true) ? $q['period'] : '';
 
     $buildings = rows("SELECT DISTINCT b.building_ID, b.building_Name FROM Building b
