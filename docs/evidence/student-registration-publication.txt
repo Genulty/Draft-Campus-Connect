@@ -1,0 +1,28 @@
+Current-main Student foundation publication — 2026-11-27
+Base: a9725667d664efba5cb4c6ed69128e45bccbeecd
+22 final checks passed on the application/test content committed by this review.
+PASS Student acceptance — bash tests/student-acceptance.sh
+PASS Registration windows — php tests/registration-windows.php
+PASS Window browser — node tests/registration-windows-browser.cjs
+PASS Program access — php tests/registration-program-access.php
+PASS Matcher — php tests/registration-requirements.php
+PASS Standing — php tests/academic-standing.php
+PASS Standing Add — php tests/standing-registration.php
+PASS Locking — php tests/registration-locking.php
+PASS Degree Audit — php tests/degree-audit.php
+PASS Admin registration — php tests/admin-student-accounts.php
+PASS Faculty — php tests/faculty-lab-visibility.php
+PASS Faculty browser — node tests/faculty-lab-visibility-browser.cjs
+PASS Admin access — bash tests/admin-access.sh
+PASS Create Section — bash tests/create-section-live.sh
+PASS Capacity — php tests/section-capacity.php
+PASS Scheduling — php tests/section-scheduling.php
+PASS Major preview — bash tests/degree-audit-major-preview.sh
+PASS Security — node tests/security/run.cjs
+PASS Requirement browser — node tests/registration-requirements-browser.cjs /private/var/folders/g0/2qpjstd13713b19_kw4bshtm0000gn/T/campus-student-review-db.N2ungP/mysql.sock
+PASS Student integration — node tests/student-review-integration.cjs /private/var/folders/g0/2qpjstd13713b19_kw4bshtm0000gn/T/campus-student-review-db.N2ungP/mysql.sock
+PASS Spring browser — node tests/spring-registration-browser.cjs /private/var/folders/g0/2qpjstd13713b19_kw4bshtm0000gn/T/campus-student-review-db.N2ungP/mysql.sock --student-review
+PASS Explicit access API — node tests/registration-program-access-api.cjs "$DB_SOCKET"
+
+Preserved teammate statistics/seed changes and merged earned-credit standing. No policy/access rows or production migration are included. Explicit CS-only policy exists only inside guarded disposable tests. Unrestricted courses remain cross-major; requirement membership alone is not a restriction. Standard password delivery remains blocked/unverified. No school-wide readiness or deployment claim.
+Initial fixed-port/grouped-selector test assumptions were corrected without weakening Add/cap/filter/lab/persistence assertions; final reruns passed.

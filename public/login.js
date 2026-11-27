@@ -935,7 +935,15 @@ item.append(availability);
   card.append(head);
   if (block.note) card.append(el('p', 'muted small note', block.note));
   if (!block.rows.length) {
-    card.append(el('p', 'muted empty-row', block.emptyText ?? 'Nothing to show.'));
+    const empty = el('p', 'muted empty-row');
+    empty.append(el('span', null, block.empty?.text ?? block.emptyText ?? 'Nothing to show.'));
+    if (block.empty?.button) {
+      const button = el('button', 'row-action secondary', block.empty.button);
+      button.type = 'button';
+      button.addEventListener('click', () => onFilter(block.empty.params));
+      empty.append(' ', button);
+    }
+    card.append(empty);
     return card;
   }
   const wrap = el('div', 'table-wrap');
@@ -949,7 +957,10 @@ item.append(availability);
   const body = el('tbody');
   for (const row of block.rows) {
     const r = el('tr');
-    for (const v of row) r.append(el('td', null, v === null ? '—' : String(v)));
+    for (const [index, value] of row.entries()) {
+      r.append(el('td', block.columns[index] === 'Requirement match' ? 'requirement-match' : null,
+        value === null ? '—' : String(value)));
+    }
     if (block.action) {
       const td = el('td');
       // A per-row choice (e.g. Present/Absent, or a letter grade) sent alongside the action's
@@ -976,6 +987,7 @@ item.append(availability);
       btn.disabled = Boolean(block.action.disabled);
       btn.addEventListener('click', () => {
         if (block.action.disabled) return;
+        if (block.action.confirm && !window.confirm(block.action.confirm)) return;
         btn.disabled = true;
         const body = { [block.action.field || block.action.column]: row[keyIndex], ...(block.action.extra || {}) };
         if (picker) body[picker.name] = picker.value;

@@ -23,6 +23,15 @@ const assert = require('node:assert/strict');
       const drops=page.getByRole('button',{name:'Drop',exact:true});
       if (name === 'no-enrollments') assert.equal(await drops.count(),0);
       else assert.equal(await drops.isEnabled(), name !== 'add-only');
+      if (name === 'empty-department') {
+        assert.equal(await page.getByText('No eligible sections in Other fixture', { exact: true }).count(), 1);
+        const requestCount = await page.evaluate(() => requests.length);
+        await page.getByRole('button', { name: 'Show all departments', exact: true }).click();
+        await page.waitForFunction(count => requests.length > count, requestCount);
+        assert.equal(await page.evaluate(() => requests.at(-1)), '/api/views/register?semester=SP27&dept=');
+        continue;
+      }
+      assert.equal(await page.locator('select[name=dept]').inputValue(), '');
       const adds=page.getByRole('button',{name:'Add',exact:true});
       if (name === 'both-open' || name === 'add-only') {
         assert.equal(await adds.isEnabled(),true);
@@ -41,10 +50,18 @@ const assert = require('node:assert/strict');
         assert.equal(await page.evaluate(()=>submissions.filter(s=>s.endpoint==='drop-section').length),0);
       }
       if (name === 'drop-only') {
+        page.once('dialog', async dialog => {
+          assert.equal(dialog.message(), 'Drop this section from your registration?');
+          await dialog.dismiss();
+        });
+        await drops.click();
+        assert.equal(await page.evaluate(() => submissions.length), 0);
+        assert.equal(await drops.isEnabled(), true);
+        page.once('dialog', dialog => dialog.accept());
         await drops.click();
         assert.equal(await page.evaluate(()=>submissions.at(-1).endpoint),'drop-section');
         await page.locator('select[name=dept]').selectOption('OTHER');
-        assert.equal(await page.evaluate(()=>requests.at(-1)), '/api/views/register?semester=SP27&dept=OTHER');
+        assert.equal(await page.evaluate(()=>requests.at(-1)), '/api/views/register?semester=SP27&dept=OTHER&unmet=');
         assert.equal(await page.locator('select[name=semester]').inputValue(),'SP27');
         assert.ok((await page.evaluate(()=>location.hash)).includes('semester=SP27&dept=OTHER'));
         await page.locator('select[name=semester]').selectOption('SP27');

@@ -569,3 +569,6 @@ button.ghost:hover { background: rgba(255,255,255,.08); }
   .audit-program-heading .audit-state { flex: 1; }
   .degree-audit .stats { grid-template-columns: 1fr; }
 }
+
+/* Personalized Register labels stay readable beside each course. */
+td.requirement-match { white-space: normal; min-width: 14rem; max-width: 24rem; overflow-wrap: anywhere; }
