@@ -569,3 +569,9 @@ button.ghost:hover { background: rgba(255,255,255,.08); }
   .audit-program-heading .audit-state { flex: 1; }
   .degree-audit .stats { grid-template-columns: 1fr; }
 }
+
+
+/* Audit checklist navigation stays within the existing Degree Audit route. */
+.audit-checklist-link { color: var(--navy, #203b66); text-underline-offset: .2em; }
+.audit-section[id], .audit-program[id] { scroll-margin-top: 1.5rem; }
+.audit-checklist-link:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }

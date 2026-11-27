@@ -278,8 +278,9 @@ function renderStudentOverview(overview, viewId) {
 // Student audit: recorded progress is separated from policies the database cannot establish.
 function renderDegreeAudit(audit, majorOptions) {
   const root = el('div', 'degree-audit');
-  const section = (title, note = null) => {
+  const section = (title, note = null, id = null) => {
     const box = el('section', 'audit-section');
+    if (id) box.id = id;
     box.append(el('h3', 'audit-section-title', title));
     if (note) box.append(el('p', 'muted audit-note', note));
     return box;
@@ -511,10 +512,33 @@ function renderDegreeAudit(audit, majorOptions) {
       panel.append(el('p', 'audit-program-note audit-credit-note', 'See Records needing review for details.'));
     }
     const checklist = el('ul', 'audit-credit-checklist');
-    for (const requirement of degree.checklist) {
+    const destinations = {
+      'General Education': 'audit-general-education', 'Liberal Arts': 'audit-liberal-arts',
+      Diversity: 'audit-diversity', Proficiency: 'audit-proficiency',
+      'Major Electives': 'audit-major-electives', 'Free Electives': 'audit-free-electives',
+    };
+    for (const [index, requirement] of degree.checklist.entries()) {
       const item = el('li');
       const name = el('span');
-      name.append(el('span', null, requirement.name));
+      const program = audit.programs[index];
+      const targetId = program ? `audit-program-${program.kind}-${program.id}` : destinations[requirement.name];
+      const link = el(targetId ? 'a' : 'span', 'audit-checklist-link', requirement.name);
+      if (targetId) {
+        link.href = '#degree-audit';
+        link.setAttribute('aria-controls', targetId);
+        link.addEventListener('click', event => {
+          event.preventDefault();
+          const target = root.querySelector(`#${CSS.escape(targetId)}`);
+          if (!target) return;
+          if (target.tagName === 'DETAILS') target.open = true;
+          target.querySelectorAll('details').forEach(details => { details.open = true; });
+          target.tabIndex = -1;
+          target.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+          target.focus({ preventScroll: true });
+        });
+      }
+      name.append(link);
+      if (requirement.draft) name.append(el('span', 'muted small', ' · Draft'));
       item.append(name, auditStatus(requirement.status));
       checklist.append(item);
     }
@@ -529,6 +553,7 @@ function renderDegreeAudit(audit, majorOptions) {
     if (!programs.length) group.append(el('p', 'muted', 'No major recorded. Requirements are unavailable.'));
     for (const program of programs) {
       const card = el('details', 'audit-program'); card.open = true;
+      card.id = `audit-program-${program.kind}-${program.id}`;
       const summary = el('summary', 'audit-program-heading');
       const title = el('div'); title.append(el('strong', null, program.name), el('span', 'muted small', program.id));
       const state = auditStatus(program.percent === null ? 'Rules unavailable'
@@ -553,7 +578,7 @@ function renderDegreeAudit(audit, majorOptions) {
   if (audit.profile.type === 'Undergraduate') {
     const requirements = audit.gen_ed ?? [];
     const genEd = section('General Education Requirements',
-      'Harvest Hill draft policy. Each requirement accepts one listed course at its stated minimum grade. Matches are evaluated independently and are excluded from graduation eligibility.');
+      'Harvest Hill draft policy. Each requirement accepts one listed course at its stated minimum grade. Matches are evaluated independently and are excluded from graduation eligibility.', 'audit-general-education');
     const completed = requirements.filter(r => r.status === 'Completed').length;
     const status = auditStatus(requirements.length ? `${completed} of ${requirements.length} completed under draft rules` : 'Rules unavailable',
       requirements.length && completed === requirements.length);
@@ -566,7 +591,7 @@ function renderDegreeAudit(audit, majorOptions) {
 
   const liberal = audit.liberal_arts;
   if (liberal) {
-    const group = section('Liberal Arts Requirement');
+    const group = section('Liberal Arts Requirement', null, 'audit-liberal-arts');
     const panel = auditAccordion('Liberal Arts Courses', auditStatus(liberal.status));
     if (liberal.status === 'Rules unavailable') {
       panel.append(el('p', 'audit-program-note audit-credit-note', 'A Liberal Arts credit target and eligible courses must be configured for this program.'));
@@ -585,7 +610,7 @@ function renderDegreeAudit(audit, majorOptions) {
 
   if (audit.diversity) {
     const rule = audit.diversity;
-    const group = section('Diversity Requirement');
+    const group = section('Diversity Requirement', null, 'audit-diversity');
     const panel = auditAccordion('Diversity Courses', auditStatus(rule.status));
     if (rule.draft) panel.append(el('p', 'audit-program-note audit-credit-note', 'Harvest Hill draft rule'));
     if (rule.configured) panel.append(requirementTable('Diversity courses', [rule]));
@@ -596,7 +621,7 @@ function renderDegreeAudit(audit, majorOptions) {
 
   if (audit.proficiency) {
     const proficiency = audit.proficiency;
-    const group = section('Proficiency Requirements');
+    const group = section('Proficiency Requirements', null, 'audit-proficiency');
     const panel = auditAccordion('Proficiency', auditStatus(proficiency.status));
     if (proficiency.draft) panel.append(el('p', 'audit-program-note audit-credit-note', 'Includes Harvest Hill draft rules.'));
     if (proficiency.configured) {
@@ -627,7 +652,7 @@ function renderDegreeAudit(audit, majorOptions) {
 
   for (const [title, electives] of [['Major Electives', audit.major_electives], ['Free Electives', audit.free_electives]]) {
     if (!electives) continue;
-    const group = section(title);
+    const group = section(title, null, title === 'Major Electives' ? 'audit-major-electives' : 'audit-free-electives');
     const panel = auditAccordion(`${title === 'Major Electives' ? 'Major' : 'Free'} Elective Courses`, auditStatus(electives.status));
     const draft = electives.draft ? 'Harvest Hill draft rule. ' : '';
     if (!electives.configured) {
