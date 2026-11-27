@@ -1,0 +1,32 @@
+Transcript earned-credit summary — local review verification 2026-11-27
+Base: a9725667d664efba5cb4c6ed69128e45bccbeecd
+
+Recovered the verified summary-only fix. The old current-main view returned 19 credits in the memory-only regression; corrected view returns 7 while retaining all seven visible attempts. The shared posted-credit and standing calculator is unchanged. Failed, withdrawn, unposted, in-progress, future, unsupported and inconsistent evidence earns no credit; repeated eligible courses count once. Student 100001: 59/Junior; 100018: 50/Sophomore; Transcript, Degree Audit and Overview agree across repeated HTTP reads. GPA and attempt-row presentation are intentionally unchanged.
+
+Final checks (see serial navigation rerun note above where applicable):
+registration: PASS — php tests/registration-windows.php
+registration-browser: PASS — node tests/registration-windows-browser.cjs
+registration-API: PASS — node tests/registration-windows-api.cjs
+standing: PASS — php tests/academic-standing.php
+standing-add: PASS — php tests/standing-registration.php
+locking: PASS — php tests/registration-locking.php
+degree-audit: PASS — php tests/degree-audit.php
+admin-registration: PASS — php tests/admin-student-accounts.php
+faculty: PASS — php tests/faculty-lab-visibility.php
+faculty-browser: PASS — node tests/faculty-lab-visibility-browser.cjs
+admin-access: PASS — bash tests/admin-access.sh
+create-section: PASS — bash tests/create-section-live.sh
+capacity: PASS — php tests/section-capacity.php
+scheduling: PASS — php tests/section-scheduling.php
+major-preview: PASS — bash tests/degree-audit-major-preview.sh
+security: PASS — node tests/security/run.cjs
+dashboard-filters: PASS — php tests/dashboard-filter-validation.php
+dashboard-browser: PASS — node tests/dashboard-filter-restoration.cjs
+repeat-credit: PASS — php tests/transcript-credit-repeats.php
+credit-surfaces: PASS — node tests/transcript-credit-surfaces.cjs
+
+Combined current-main build: 23/23 suite invocations passed.
+Temporary integration with PR #15 (and #14) passed the branch-native Student acceptance suite and requirement-matcher, matcher-browser, new full-time registration integration and audit navigation checks. Standard password delivery remains unverified, even though local verification fixtures passed.
+All three feature branches target main independently. None depends on PR #14/#15. Audit navigation overlaps #15 only in asset versions and end-of-stylesheet context; those were explicitly reconciled in the temporary integration worktree. Whichever lands second must reconcile those contexts and rerun browser checks.
+No academic evaluation rules, shared seed, transcript reconstruction, proposed prerequisites or timetable data are included. Fresh disposable current-main seed and its existing draft migrations were used; all draft rules remain draft. No production/shared database was read or written.
+Original worktrees, demos and PR #14/#15 remained untouched. No claim of school-wide capacity, concurrency or secure password delivery.

@@ -244,11 +244,11 @@ function viewSchedule(array $u, array $q): array
 function viewTranscript(array $u, array $q): array
 {
     $gpa = one("SELECT ROUND(SUM(" . GPA_POINTS . " * c.course_Credits) / SUM(c.course_Credits), 2) AS gpa,
-        SUM(IF(h.grade <> 'F', c.course_Credits, 0)) AS earned, COUNT(*) AS courses
+        COUNT(*) AS courses
       FROM Student_History h JOIN Course_Section cs ON cs.CRN = h.CRN JOIN Course c ON c.course_ID = cs.course_ID
       WHERE h.student_ID = ?", [$u['id']]);
     return ['title' => 'Unofficial transcript', 'blocks' => [
-        stats([['Cumulative GPA', $gpa['gpa']], ['Credits earned', $gpa['earned']], ['Courses completed', $gpa['courses']]]),
+        stats([['Cumulative GPA', $gpa['gpa']], ['Credits earned', studentEarnedCredits((int) $u['id'])], ['Courses completed', $gpa['courses']]]),
         table('Completed courses', 'SELECT sem.semester_Name AS Semester, cs.course_ID AS Course, c.course_Name AS Title,
             c.course_Credits AS Credits, h.grade AS Grade
           FROM Student_History h JOIN Course_Section cs ON cs.CRN = h.CRN JOIN Course c ON c.course_ID = cs.course_ID
