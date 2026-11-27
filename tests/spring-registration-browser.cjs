@@ -1,6 +1,5 @@
 async function revealSection(page, crn) {
-  let row = page.locator(`tr[data-crn="${crn}"]`);
-  if (!await row.count()) row = page.getByRole('row').filter({has:page.getByRole('cell',{name:String(crn),exact:true})});
+  const row = page.locator(`tr[data-crn="${crn}"]`);
   await row.waitFor({state:'attached'});
   const group = page.locator('details.registration-course-group').filter({has:row});
   if (await group.count() && !(await group.evaluate(e=>e.open))) await group.locator(':scope > summary').click();
@@ -156,8 +155,7 @@ async function run() {
         assert.ok(bio110[biology.columns.indexOf('Lab time')]);
         const offered = page.locator('.table-card').filter({ has: page.getByRole('heading', { name: 'Sections you can add', exact: true }) });
         await revealSection(page,10579);
-        const groupedRow = offered.locator('tr[data-crn="10579"]');
-        const row = await groupedRow.count() ? groupedRow : offered.getByRole('row').filter({has:page.getByRole('cell',{name:'10579',exact:true})});
+        const row = offered.locator('tr[data-crn="10579"]');
         const accepted = page.waitForResponse(r => r.url().endsWith('/api/actions/add-section'));
         await row.getByRole('button', { name: 'Add', exact: true }).click();
         assert.equal((await accepted).status(), 200);

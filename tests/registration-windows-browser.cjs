@@ -39,10 +39,7 @@ const assert = require('node:assert/strict');
         assert.equal(await page.evaluate(()=>submissions.at(-1).endpoint),'add-section');
       } else {
         assert.equal(await adds.count(),0);
-        const blocked=page.getByRole('button',{name:'Try',exact:true});
-        assert.equal(await blocked.isDisabled(),true);
-        // Even a synthetic click cannot dispatch a disabled action.
-        await blocked.dispatchEvent('click');
+        assert.equal(await page.getByRole('button',{name:'Try',exact:true}).count(),0);
         assert.equal(await page.evaluate(()=>submissions.length),0);
       }
       if (name === 'add-only') {

@@ -572,3 +572,151 @@ button.ghost:hover { background: rgba(255,255,255,.08); }
 
 /* Personalized Register labels stay readable beside each course. */
 td.requirement-match { white-space: normal; min-width: 14rem; max-width: 24rem; overflow-wrap: anywhere; }
+
+/* Register groups course and meeting data instead of forcing every field into a column. */
+.registration-table { min-width: 0; }
+.registration-table table { width: 100%; table-layout: fixed; }
+.registration-table th, .registration-table td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; padding: 12px 10px; }
+.registration-table th { font-size: .75rem; }
+.registration-table td { font-size: .8125rem; line-height: 1.5; }
+.registration-table th:first-child { width: 21%; }
+.registration-table th:nth-child(2) { width: 20%; }
+.registration-table th:nth-child(3):not(:last-child) { width: 7%; }
+.registration-table th:last-child { width: 19%; }
+.registration-table .registration-code, .registration-title, .registration-meta, .registration-match { display: block; }
+.registration-table .registration-code { color: #193b6d; font-size: .9375rem; }
+.registration-title { margin: 2px 0 5px; }
+.registration-meta { color: #53617a; font-size: .75rem; margin-top: 4px; }
+.registration-meeting { display: grid; margin-bottom: 8px; }
+.registration-meeting strong { font-size: .75rem; }
+.registration-table td.requirement-match { min-width: 0; max-width: none; }
+.registration-match + .registration-match { margin-top: 8px; }
+.registration-prerequisites { white-space: pre-line; }
+.registration-restriction { color: #7b3038; }
+.registration-full { color: #7b3038; font-weight: 600; }
+.registration-needed { margin: 5px 0 0; padding-left: 16px; }
+.registration-needed li + li { margin-top: 5px; }
+.registration-table .row-action { min-height: 40px; }
+@media (max-width: 1050px) {
+  .registration-table table, .registration-table tbody { display: block; }
+  .registration-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .registration-table tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; padding: 16px; border-top: 1px solid #e3e7ef; }
+  .registration-table tbody td { display: block; padding: 0; border: 0; min-width: 0; }
+  .registration-table td::before { content: attr(data-label); display: block; font-size: .6875rem; text-transform: uppercase; letter-spacing: .035em; font-weight: 600; color: #53617a; margin-bottom: 4px; }
+}
+@media (max-width: 600px) {
+  .registration-table tbody tr { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .registration-table .table-head { align-items: start; gap: 8px; }
+  .registration-table td { font-size: .875rem; }
+}
+
+/* Compact summaries; full evidence stays available by keyboard and touch. */
+.registration-reasons { margin: 0; padding: 0; list-style: none; }
+.registration-reasons li + li { margin-top: 5px; }
+.registration-restriction-details { margin-top: 8px; }
+.registration-restriction-details summary { color: #254e82; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.registration-restriction-details summary:focus-visible { outline: 2px solid #254e82; outline-offset: 3px; }
+.registration-reason-detail { margin-top: 10px; }
+.registration-reason-detail p { margin: 3px 0; }
+.registration-api-reason { margin-top: 10px; color: #53617a; font-size: .75rem; }
+
+/* Catalog-course groups: shared information once, actual eligibility per section. */
+.registration-course-group { border-top: 1px solid #e3e7ef; }
+.registration-course-summary { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 14px 16px; cursor: pointer; list-style: none; }
+.registration-course-summary::-webkit-details-marker { display: none; }
+.registration-course-summary::before { content: '+'; font-weight: 700; color: #254e82; }
+.registration-course-group[open] > summary::before { content: '−'; }
+.registration-course-summary:focus-visible { outline: 2px solid #254e82; outline-offset: -3px; }
+.registration-course-identity { flex: 1; min-width: 0; }
+.registration-course-summary .registration-title { display: inline; margin-left: 10px; }
+.registration-course-meta { display: block; font-size: .75rem; color: #53617a; margin-top: 4px; }
+.registration-course-state { display: grid; gap: 5px; flex: 1; min-width: 0; font-size: .8125rem; }
+.registration-available { color: #205c43; }
+.registration-course-content { padding: 0 16px 14px; }
+.registration-shared { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 18px; padding: 12px; margin: 0; border-radius: 8px; background: #f5f7fb; }
+.registration-shared dt { font-size: .6875rem; text-transform: uppercase; color: #53617a; font-weight: 600; }
+.registration-shared dd { margin: 4px 0 0; font-size: .8125rem; overflow-wrap: anywhere; }
+.registration-section-table { border: 0; border-radius: 0; }
+.registration-section-table > .table-head { display: none; }
+.registration-section-table th:first-child { width: 15%; }
+.registration-section-table th:nth-child(2) { width: 35%; }
+.registration-section-table th:nth-child(3):not(:last-child) { width: 12%; }
+.registration-section-table th:last-child { width: 38%; }
+@media(max-width:600px) {
+  .registration-course-summary { flex-wrap: wrap; gap: 8px; }
+  .registration-course-summary .registration-title { display: block; margin: 3px 0 0; }
+  .registration-course-state { flex: 1 1 100%; margin-left: 18px; }
+  .registration-shared { grid-template-columns: minmax(0,1fr); }
+  .registration-course-content { padding: 0 12px 12px; }
+}
+
+/* Presentation polish: course first, requirements next, availability/action last. */
+.registration-course-list > .table-head { padding: 18px 20px 10px; align-items: baseline; gap: 12px; }
+.registration-course-list > .note { padding: 0 20px 14px; margin: 0; line-height: 1.5; }
+.registration-course-summary { display: grid; grid-template-columns: 14px minmax(0,1.05fr) minmax(0,1.2fr) minmax(140px,.55fr); gap: 18px; padding: 18px 20px; align-items: center; }
+.registration-course-summary:hover { background: #f8fafc; }
+.registration-course-group[open] > .registration-course-summary { background: #f6f8fc; }
+.registration-course-summary .registration-title { display: block; margin: 3px 0 0; color: #26334b; font-weight: 500; line-height: 1.4; }
+.registration-course-summary .registration-code { font-size: .9375rem; color: #193b6d; }
+.registration-course-requirements { display: grid; gap: 7px; min-width: 0; }
+.registration-course-state { justify-items: end; text-align: right; gap: 6px; }
+.registration-match { font-size: .8125rem; line-height: 1.45; }
+.registration-match.is-draft { color: #765012; }
+.registration-match.is-confirmed { color: #234f83; }
+.registration-prerequisite-summary, .registration-no-match { color: #5b687e; font-size: .75rem; line-height: 1.5; }
+.registration-available { display: inline-block; font-size: .75rem; font-weight: 600; color: #245a43; background: #edf6f0; border-radius: 6px; padding: 5px 9px; }
+.registration-primary-reason { font-size: .8125rem; color: #81414a; font-weight: 500; }
+.registration-course-content { padding: 2px 20px 18px 52px; }
+.registration-shared { gap: 24px; padding: 14px 16px; border: 1px solid #e5eaf2; background: #fafbfe; }
+.registration-shared dt { letter-spacing: .04em; }
+.registration-prerequisite-rule { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: baseline; gap: 3px 10px; margin-bottom: 8px; }
+.registration-prerequisite-rule:last-child { margin-bottom: 0; }
+.registration-rule-state { font-size: .6875rem; font-weight: 600; padding: 1px 6px; border-radius: 4px; }
+.registration-rule-state.is-met { color: #245a43; background: #edf6f0; }
+.registration-rule-state.is-needed { color: #81414a; background: #fbf0f1; }
+.registration-grade { grid-column: 1 / -1; color: #637086; font-size: .75rem; }
+.registration-other-matches { margin-top: 8px; }
+.registration-other-matches summary { color: #3b5c87; cursor: pointer; font-size: .75rem; }
+.registration-other-matches ul { padding-left: 16px; margin: 7px 0 0; }
+.registration-other-matches li + li { margin-top: 5px; }
+.registration-draft-text { color: #765012; }
+.registration-section-table th:first-child { width: 16%; }
+.registration-section-table th:nth-child(2) { width: 44%; }
+.registration-section-table th:nth-child(3):not(:last-child) { width: 10%; }
+.registration-section-table th:last-child { width: 30%; }
+.registration-section-table th { background: #fff; color: #5b687e; padding-top: 15px; font-size: .6875rem; letter-spacing: .03em; }
+.registration-section-table td { padding-top: 14px; padding-bottom: 14px; }
+@media(max-width:1050px) {
+  .registration-course-summary { grid-template-columns: 14px minmax(0,1fr) auto; gap: 10px 14px; }
+  .registration-course-requirements { grid-column: 2 / -1; grid-row: 2; }
+  .registration-course-state { grid-column: 3; grid-row: 1; max-width: 150px; }
+  .registration-course-content { padding-left: 20px; }
+}
+@media(max-width:600px) {
+  .registration-course-list > .table-head { padding: 16px 14px 8px; flex-wrap: wrap; }
+  .registration-course-list > .note { padding: 0 14px 12px; }
+  .registration-course-summary { grid-template-columns: 12px minmax(0,1fr); padding: 15px 14px; gap: 8px 10px; }
+  .registration-course-state { grid-column: 2; grid-row: 3; justify-items: start; text-align: left; max-width: none; margin-left: 0; }
+  .registration-course-requirements { grid-column: 2; }
+  .registration-course-content { padding: 0 12px 14px; }
+  .registration-shared { padding: 12px; gap: 16px; }
+  .registration-section-table tbody tr { padding: 14px 4px; }
+}
+
+/* Course summary owns the primary match; expanded evidence only adds detail. */
+.registration-shared { grid-template-columns: minmax(0, 1fr); gap: 12px; border: 0; border-radius: 0; background: transparent; padding: 12px 0; border-bottom: 1px solid #e5eaf2; }
+.registration-prerequisite-rule { grid-template-columns: minmax(0, 1fr) auto; align-items: center; padding: 8px 0; margin: 0; }
+.registration-prerequisite-rule + .registration-prerequisite-rule { border-top: 1px solid #eef1f6; }
+.registration-prerequisite-rule .registration-rule-state { grid-column: 2; grid-row: 1 / span 2; justify-self: end; }
+.registration-prerequisite-rule .registration-grade { grid-column: 1; }
+.registration-other-matches { margin: 0; }
+.registration-meta { margin: 10px 0; }
+
+/* Match names stay aligned with Degree Audit; approval is a separate disclosure. */
+.registration-match { display: inline; }
+.registration-match.is-draft { color: #234f83; }
+.registration-provisional { display: inline-block; margin-left: 6px; padding: 1px 5px; border-radius: 4px; color: #6b571e; background: #f7f3e7; font-size: .6875rem; line-height: 1.5; vertical-align: baseline; }
+.registration-provisional:focus-visible { outline: 2px solid #254e82; outline-offset: 2px; }
+.registration-meeting-fields { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 8px; margin: 4px 0 0; }
+.registration-meeting-fields dt { color: #637086; font-size: .75rem; }
+.registration-meeting-fields dd { margin: 0; overflow-wrap: anywhere; }

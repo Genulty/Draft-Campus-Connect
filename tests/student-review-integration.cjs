@@ -1,3 +1,10 @@
+async function revealSection(page, crn) {
+  const row = page.locator(`tr[data-crn="${crn}"]`);
+  await row.waitFor({state:'attached'});
+  const group = page.locator('details.registration-course-group').filter({has:row});
+  if (await group.count() && !(await group.evaluate(e=>e.open))) await group.locator(':scope > summary').click();
+  return group;
+}
 const assert=require('node:assert/strict');
 const {execFileSync}=require('node:child_process');
 const {writeFileSync}=require('node:fs');
@@ -7,6 +14,7 @@ assert.match(socket,/\/campus-student-review-db\.[A-Za-z0-9]+\/mysql\.sock$/);
 const sql=q=>execFileSync('mysql',['--no-defaults','--protocol=socket','--socket='+socket,'-uroot','-NBr','campus_connect'],{input:q,encoding:'utf8'}).trim();
 assert.equal(sql('SELECT @@skip_networking AND @@server_id=732156'),'1');
 const base=process.env.REGISTER_BASE || 'http://127.0.0.1:3012';
+assert.match(base, /^http:\/\/(localhost|127\.0\.0\.1):\d+$/);
 const data=async(r,status=200)=>{assert.equal(r.status(),status,await r.text());return r.json();};
 async function run(){
  const browser=await chromium.launch({executablePath:process.env.CHROME_PATH});
@@ -30,8 +38,9 @@ async function run(){
  const plans=[];
  for(const [crn,credits]of[[10611,3],[10555,3],[10612,3],[10579,4]]){
   const table=p.locator('.table-card').filter({has:p.getByRole('heading',{name:'Sections you can add',exact:true})});
-  const row=table.getByRole('row').filter({has:p.getByRole('cell',{name:String(crn),exact:true})});
-  await row.getByRole('cell').filter({hasText:'Draft Gen Ed match'}).waitFor();
+  const courseGroup=await revealSection(p,crn);
+  const row=table.locator(`tr[data-crn="${crn}"]`);
+  assert.match(await courseGroup.locator(':scope > summary .registration-match-label').textContent(), /Applies to: General Education/);
   const request=p.waitForResponse(r=>r.url().endsWith('/api/actions/add-section'));
   await row.getByRole('button',{name:'Add',exact:true}).click();
   await data(await request);
@@ -61,7 +70,7 @@ async function run(){
  const snapshot=sql('SELECT * FROM Student_History WHERE student_ID='+id+';SELECT * FROM Enrollment WHERE student_ID='+id+' ORDER BY CRN');
  await p.reload();
  assert.equal(sql('SELECT * FROM Student_History WHERE student_ID='+id+';SELECT * FROM Enrollment WHERE student_ID='+id+' ORDER BY CRN'),snapshot);
- writeFileSync(__dirname+'/../../missing-rules-fulltime-result.json',JSON.stringify({id,major:'ECON-BS',target:'Rules unavailable',earned:0,plans},null,2)+'\n');
+ writeFileSync(process.env.REGISTER_EVIDENCE_DIR ? require('node:path').join(process.env.REGISTER_EVIDENCE_DIR,'missing-rules-fulltime-result.json') : __dirname+'/../../missing-rules-fulltime-result.json',JSON.stringify({id,major:'ECON-BS',target:'Rules unavailable',earned:0,plans},null,2)+'\n');
  console.log('PASS: Admin-created Economics student '+id+' reached 13 credits through labeled Gen Ed options; missing program credit rules remained Rules unavailable after refresh; filters preserved registrations and totals.');
  }finally{await browser.close();}
 }

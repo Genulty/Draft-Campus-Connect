@@ -1,3 +1,10 @@
+async function revealSection(page, crn) {
+  const row = page.locator(`tr[data-crn="${crn}"]`);
+  await row.waitFor({state:'attached'});
+  const group = page.locator('details.registration-course-group').filter({has:row});
+  if (await group.count() && !(await group.evaluate(e=>e.open))) await group.locator(':scope > summary').click();
+  return group;
+}
 // Student acceptance using Chromium, published API routes, and a private disposable fixture.
 const assert = require('node:assert/strict');
 const { chromium } = require('playwright');
@@ -83,8 +90,9 @@ async function run() {
       await open(page,'register','Register for Spring 2027');
       assert.equal(await page.locator('select[name=dept]').inputValue(),'');
       const canAdd=page.locator('.table-card').filter({has:page.getByRole('heading',{name:'Sections you can add',exact:true})});
-      const findRow=card=>card.getByRole('row').filter({has:page.getByRole('cell',{name:'10579',exact:true})});
+      const findRow=card=>card.locator('tr[data-crn="10579"]');
       const clicked=page.waitForResponse(r=>r.url().endsWith('/api/actions/add-section'));
+      await revealSection(page,10579);
       await findRow(canAdd).getByRole('button',{name:'Add',exact:true}).click();
       await expectResponse(await clicked,200,/Added BIO110/);
       await page.reload();

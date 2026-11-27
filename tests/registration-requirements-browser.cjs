@@ -1,3 +1,10 @@
+async function revealSection(page, crn) {
+  const row = page.locator(`tr[data-crn="${crn}"]`);
+  await row.waitFor({state:'attached'});
+  const group = page.locator('details.registration-course-group').filter({has:row});
+  if (await group.count() && !(await group.evaluate(e=>e.open))) await group.locator(':scope > summary').click();
+  return group;
+}
 const assert=require('node:assert/strict');
 const {execFileSync}=require('node:child_process');
 const {chromium}=require('playwright');
@@ -6,6 +13,7 @@ assert.match(socket,/\/campus-student-review-db\.[A-Za-z0-9]+\/mysql\.sock$/);
 const sql=q=>execFileSync('mysql',['--no-defaults','--protocol=socket','--socket='+socket,'-uroot','-NBr','campus_connect'],{input:q,encoding:'utf8'}).trim();
 assert.equal(sql('SELECT @@skip_networking AND @@server_id=732156'),'1');
 const base=process.env.REGISTER_BASE || 'http://127.0.0.1:3012',password=process.env.DEMO_PASSWORD;
+assert.match(base, /^http:\/\/(localhost|127\.0\.0\.1):\d+$/);
 assert.ok(password);
 const data=async(res,status=200)=>{assert.equal(res.status(),status,await res.text());return res.json();};
 const table=(v,name)=>v.blocks.find(b=>b.title===name);
@@ -34,10 +42,10 @@ async function run(){
   assert.equal(stats.items.find(i=>i.label==='Registered credits').value,'9 of 16');
   const blocked=table(initial,"Sections you can't add");
   const at=blocked.columns.indexOf('Requirement match');
-  assert.equal(blocked.columns[at-1],'Course');
+  assert.equal(blocked.columns[at-1],'Prerequisites');
   for(const crn of [10931,10932]){
    const row=blocked.rows.find(r=>r[0]===crn);
-   assert.equal(row[at],'Draft Gen Ed match · World History and Cultures');
+   assert.equal(row[at],'Applies to: General Education — World History and Cultures');
    assert.match(row.at(-1),/same time/);
   }
   for(const b of initial.blocks.filter(b=>b.type==='table'&&b.columns.includes('Requirement match'))){
@@ -48,11 +56,11 @@ async function run(){
   p.on('pageerror',e=>errors.push(e.message));
   await p.goto(base+'/#register?semester=SP27');
   const cards=title=>p.locator('.table-card').filter({has:p.getByRole('heading',{name:title,exact:true})});
-  await cards("Sections you can't add").getByText('Draft Gen Ed match · World History and Cultures',{exact:true}).first().waitFor();
+  await cards("Sections you can't add").getByText('Applies to: General Education — World History and Cultures',{exact:true}).first().waitFor();
   for(const width of [1440,390]){
    await p.setViewportSize({width,height:900});
    assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
-   assert.equal(await p.locator('td.requirement-match').first().evaluate(e=>getComputedStyle(e).whiteSpace),'normal');
+   assert.equal(await p.locator('.registration-course-summary .registration-match').first().evaluate(e=>getComputedStyle(e).whiteSpace),'normal');
   }
   await p.setViewportSize({width:1440,height:900});
   await p.getByRole('combobox',{name:'Requirement matches',exact:true}).selectOption('1');
@@ -91,7 +99,7 @@ async function run(){
   const mathView=await data(await math.request.get(base+'/api/views/register?semester=SP27'));
   const mathCourses=table(mathView,'Sections you can add');
   assert.match(mathCourses.rows.find(r=>r[mathCourses.columns.indexOf('Course')]==='MATH110')[mathCourses.columns.indexOf('Requirement match')],
-   /Major requirement.*Mathematics.*Calculus I/);
+   /Applies to: Major Requirements.*Calculus I/);
   assert.deepEqual(await view('&student_ID=100001&preview_major=CS-BS'),initial,'Another student or preview parameter changed the signed-in matches');
 
   const admin=await login(300001,'Admin');
@@ -101,9 +109,10 @@ async function run(){
   newCrn=Number(created.message.match(/CRN (\d+)/)[1]);
   const alternate=table(await view('&unmet=1'),'Sections you can add');
   assert.equal(alternate.rows.find(r=>r[0]===newCrn)[alternate.columns.indexOf('Requirement match')],
-   'Draft Gen Ed match · World History and Cultures');
+   'Applies to: General Education — World History and Cultures');
   await p.reload();
-  const row=cards('Sections you can add').getByRole('row').filter({has:p.getByRole('cell',{name:String(newCrn),exact:true})});
+  await revealSection(p,newCrn);
+  const row=cards('Sections you can add').locator(`tr[data-crn="${newCrn}"]`);
   const pending=p.waitForResponse(r=>r.url().endsWith('/api/actions/add-section'));
   await row.getByRole('button',{name:'Add',exact:true}).click();
   await data(await pending);

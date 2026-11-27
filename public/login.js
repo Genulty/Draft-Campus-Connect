@@ -928,6 +928,8 @@ item.append(availability);
     return container;
   }
 
+  if (block.layout === 'registration') return renderRegistrationTable(block, onFilter);
+
   // table
   const card = el('div', 'table-card');
   const head = el('div', 'table-head');
@@ -1001,6 +1003,194 @@ item.append(availability);
   table.append(body);
   wrap.append(table);
   card.append(wrap);
+  return card;
+}
+
+// Register-only grouping; API columns and the shared Add validator remain authoritative.
+function renderRegistrationTable(block, onFilter) {
+  if (block.courseGroups) return renderRegistrationCourses(block, onFilter);
+  const card = el('section', 'table-card registration-table');
+  const head = el('div', 'table-head');
+  head.append(el('h3', null, block.title), el('span', 'muted small', `${block.rows.length} section${block.rows.length === 1 ? '' : 's'}`));
+  card.append(head);
+  if (block.note) card.append(el('p', 'muted small note', block.note));
+  if (!block.rows.length) {
+    const empty = el('p', 'muted empty-row');
+    empty.append(el('span', null, block.empty?.text ?? block.emptyText ?? 'Nothing to show.'));
+    if (block.empty?.button) {
+      const button = el('button', 'row-action secondary', block.empty.button);
+      button.type = 'button'; button.addEventListener('click', () => onFilter(block.empty.params));
+      empty.append(' ', button);
+    }
+    card.append(empty); return card;
+  }
+  const sectionOnly = Boolean(block.groupedCourse);
+  const offered = !sectionOnly && block.columns.includes('Prerequisites');
+  const lastColumn = block.action ? 'Registration' : 'Reason / Restriction';
+  const headers = sectionOnly ? ['Section', 'Meetings', 'Open seats', lastColumn] : offered ? ['Course', 'Meetings', 'Open seats', 'Prerequisites', 'Requirement match', lastColumn] : ['Course', 'Meetings', 'Registration'];
+  const table = el('table'); table.setAttribute('aria-label', block.title);
+  const thead = el('thead'), heading = el('tr');
+  for (const label of headers) { const th = el('th', null, label); th.scope = 'col'; heading.append(th); }
+  thead.append(heading); table.append(thead);
+  const tbody = el('tbody');
+  for (const row of block.rows) {
+    const value = name => { const at = block.columns.indexOf(name); return at < 0 ? null : row[at]; };
+    const tr = el('tr'); tr.dataset.crn = String(value('CRN'));
+    const cells = headers.map(label => { const td = el('td'); td.dataset.label = label; tr.append(td); return td; });
+    const course = cells[0]; course.id = `registration-course-${value('CRN')}`;
+    if (sectionOnly) {
+      course.append(el('strong', null, `Section ${value('Section') ?? '—'}`), el('span', 'registration-meta', `CRN ${value('CRN')}`));
+    } else {
+    course.append(el('strong', 'registration-code', value('Course') || value('Title')), el('span', 'registration-title', value('Title')));
+    course.append(el('span', 'registration-meta', `CRN ${value('CRN')} · Section ${value('Section') ?? '—'} · ${value('Credits') ?? '—'} credits`));
+    if (value('Level')) course.append(el('span', 'registration-meta', `Minimum standing: ${value('Level')}`));
+    if (value('Planning suggestion')) course.append(el('span', 'registration-meta', value('Planning suggestion')));
+    }
+    const meeting = (label, days, time, room) => {
+      const group = el('div', 'registration-meeting');
+      group.append(el('strong', null, label));
+      const fields = el('dl', 'registration-meeting-fields');
+      for (const [name, value] of [['Days', days], ['Time', time], ['Location', room]]) {
+        fields.append(el('dt', null, name), el('dd', null, value || 'Not scheduled'));
+      }
+      group.append(fields);
+      cells[1].append(group);
+    };
+    meeting('Lecture', value('Days'), value('Time'), value('Room'));
+    if (value('Lab time') || value('Lab days') || value('Lab room')) meeting('Lab', value('Lab days'), value('Lab time'), value('Lab room'));
+    if (value('Instructor')) cells[1].append(el('span', 'registration-meta', `Instructor: ${value('Instructor')}`));
+    if (sectionOnly) cells[2].append(el('span', Number(value('Open seats')) === 0 ? 'registration-full' : null, value('Open seats') ?? '—'));
+    if (offered) {
+      cells[2].append(el('span', Number(value('Open seats')) === 0 ? 'registration-full' : null, value('Open seats') ?? '—'));
+      cells[3].append(el('span', 'registration-prerequisites', value('Prerequisites') === '—' ? 'None' : value('Prerequisites')));
+      cells[4].classList.add('requirement-match');
+      if (value('Requirement match')) {
+        for (const label of value('Requirement match').split('; ')) {
+          const match = block.requirementMatchesByCourse?.[value('Course')]?.find(item => item.label === label);
+          cells[4].append(renderRegistrationMatch(match, label));
+        }
+      } else cells[4].append(el('span', 'muted', 'Requirement match unavailable'));
+    }
+    const action = cells.at(-1);
+    const rowAction = !block.sectionEligibility || block.sectionEligibility[String(value('CRN'))] ? block.action : null;
+    if (rowAction) {
+      const button = el('button', `row-action ${rowAction.style || ''}`, rowAction.label);
+      button.type = 'button'; button.disabled = Boolean(rowAction.disabled);
+      button.setAttribute('aria-describedby', [course.id, block.groupLabelId].filter(Boolean).join(' '));
+      button.addEventListener('click', () => {
+        if (rowAction.disabled || button.disabled) return;
+        if (rowAction.confirm && !window.confirm(rowAction.confirm)) return;
+        button.disabled = true;
+        runAction(rowAction.endpoint, { [rowAction.field || rowAction.column]: value(rowAction.column), ...(rowAction.extra || {}) });
+      });
+      action.append(button);
+    } else {
+      const reasons = block.restrictions?.[String(value('CRN'))];
+      if (reasons?.length) {
+        const summaries = el('ul', 'registration-reasons');
+        summaries.append(el('li', 'registration-restriction', reasons[0].summary));
+        action.append(summaries);
+        const details = el('details', 'registration-restriction-details');
+        const summary = el('summary', null, reasons.length > 1 ? `Full explanation (${reasons.length} restrictions)` : 'Full explanation');
+        summary.setAttribute('aria-label', `Full explanation for ${value('Course')}, CRN ${value('CRN')}`);
+        details.append(summary);
+        for (const reason of reasons) {
+          const group = el('div', 'registration-reason-detail');
+          group.append(el('strong', null, reason.summary), el('p', reason.explanation === value('Reason') ? 'registration-api-reason' : null, reason.explanation));
+          if (reason.prerequisites?.length) {
+            group.append(el('strong', null, 'Prerequisites needed'));
+            const list = el('ul', 'registration-needed');
+            for (const item of reason.prerequisites) list.append(el('li', null, `${item.id} · ${item.title} (grade ${item.min} or better)`));
+            group.append(list);
+          }
+          details.append(group);
+        }
+        // Keep the server's exact current refusal accessible even when several checks apply.
+        if (!reasons.some(reason => reason.explanation === value('Reason'))) {
+          details.append(el('p', 'registration-api-reason', value('Reason')));
+        }
+        action.append(details);
+      } else action.append(el('span', 'registration-restriction', value('Reason') || 'Registration unavailable'));
+    }
+    tbody.append(tr);
+  }
+  table.append(tbody); card.append(table); return card;
+}
+
+// Labels describe possible contribution; approval is always disclosed separately.
+function renderRegistrationMatch(match, fallback = '') {
+  const text = match?.label || fallback;
+  const value = el('span', text ? `registration-match ${match?.draft ? 'is-draft' : 'is-confirmed'}` : 'registration-no-match');
+  value.append(el('span', 'registration-match-label', text || 'Requirement match unavailable'));
+  if (match?.draft) {
+    const explanation = 'Provisional: this mapping has not been academically approved and does not establish graduation eligibility.';
+    const badge = el('span', 'registration-provisional', 'Provisional');
+    badge.tabIndex = 0; badge.setAttribute('role', 'note');
+    badge.title = explanation; badge.setAttribute('aria-label', explanation);
+    value.append(badge);
+  }
+  return value;
+}
+
+function renderRegistrationShared(group) {
+  const shared = el('dl', 'registration-shared');
+  const prereq = el('div'); prereq.append(el('dt', null, 'Prerequisites'));
+  const evidence = el('dd', 'registration-prerequisites');
+  if (!group.prerequisitesKnown) evidence.append(el('span', 'muted', 'Prerequisite information unavailable'));
+  else if (!group.prerequisiteDetails.length) evidence.append(el('span', 'muted', 'None'));
+  else for (const rule of group.prerequisiteDetails) {
+    const line = el('div', 'registration-prerequisite-rule');
+    line.append(el('span', null, `${rule.code} · ${rule.title || 'Catalog title unavailable'}`), el('span', `registration-rule-state ${rule.met ? 'is-met' : 'is-needed'}`, rule.met ? 'Met' : 'Not met'));
+    line.append(el('small', 'registration-grade', `Minimum grade: ${rule.minimum_grade || 'Rules unavailable'}`));
+    evidence.append(line);
+  }
+  prereq.append(evidence);
+  shared.append(prereq);
+  if (group.matches?.length > 1) {
+    const alternatives = el('div', 'registration-additional-matches');
+    const more = el('details', 'registration-other-matches');
+    more.append(el('summary', null, `Other possible matches (${group.matches.length - 1})`));
+    const list = el('ul');
+    for (const option of group.matches.slice(1)) { const item = el('li'); item.append(renderRegistrationMatch(option)); list.append(item); }
+    more.append(list); alternatives.append(more); shared.append(alternatives);
+  }
+  return shared;
+}
+
+// One native accordion per course, with its actual section-level eligibility.
+function renderRegistrationCourses(block, onFilter) {
+  const card = el('section', 'table-card registration-course-list');
+  const groups = block.courseGroups;
+  const total = groups.reduce((n, group) => n + group.rows.length, 0);
+  const head = el('div', 'table-head');
+  head.append(el('h3', null, block.title), el('span', 'muted small', `${groups.length} courses · ${total} sections`));
+  card.append(head);
+  if (block.note) card.append(el('p', 'muted small note', block.note));
+  if (!groups.length) return renderRegistrationTable({ ...block, courseGroups: undefined, rows: [] }, onFilter);
+  for (const [index, group] of groups.entries()) {
+    const details = el('details', 'registration-course-group'); details.dataset.course = group.code;
+    details.open = Boolean(block.action && index === 0);
+    const summary = el('summary', 'registration-course-summary'); summary.id = `registration-group-${group.code}`;
+    const identity = el('span', 'registration-course-identity');
+    identity.append(el('strong', 'registration-code', group.code), el('span', 'registration-title', group.title));
+    identity.append(el('span', 'registration-course-meta', `${group.credits ?? '—'} credits${group.available ? '' : ` · ${group.rows.length} section${group.rows.length === 1 ? '' : 's'}`}`));
+    const requirements = el('span', 'registration-course-requirements');
+    requirements.append(renderRegistrationMatch(group.matches?.[0], group.match || ''));
+    const state = el('span', 'registration-course-state');
+    if (group.available) {
+      const availability = group.blocked ? `${group.available} of ${group.rows.length} sections available` : `${group.available} section${group.available === 1 ? '' : 's'} available`;
+      state.append(el('strong', 'registration-available', availability));
+      if (group.blocked) state.append(el('small', 'muted', `${group.blocked} restricted`));
+    } else {
+      const primary = [...new Set(Object.values(group.restrictions).map(reasons => reasons[0]?.summary).filter(Boolean))];
+      state.append(el('span', 'registration-primary-reason', primary.join(' · ') || 'Registration restricted'));
+    }
+    summary.append(identity, requirements, state); details.append(summary);
+    const content = el('div', 'registration-course-content'); content.append(renderRegistrationShared(group));
+    if (group.level) content.append(el('p', 'registration-meta', `Minimum standing: ${group.level}`));
+    const sections = renderRegistrationTable({ type: 'table', title: 'Sections', layout: 'registration', groupedCourse: true, groupLabelId: summary.id, columns: group.columns, rows: group.rows, sectionEligibility: group.sectionEligibility, restrictions: group.restrictions, action: block.action }, onFilter);
+    sections.classList.add('registration-section-table'); content.append(sections); details.append(content); card.append(details);
+  }
   return card;
 }
 

@@ -1,0 +1,12 @@
+<?php
+declare(strict_types=1);
+$cls=class_exists('Pdo\\Sqlite')?'Pdo\\Sqlite':PDO::class;$db=new $cls('sqlite::memory:',null,null,[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION,PDO::ATTR_DEFAULT_FETCH_MODE=>PDO::FETCH_ASSOC]);
+$register=method_exists($db,'createFunction')?'createFunction':'sqliteCreateFunction';$db->$register('FIELD',static function($needle,...$values){$i=array_search($needle,$values,true);return $i===false?0:$i+1;},-1);
+require __DIR__.'/../api/actions.php';
+$db->exec("CREATE TABLE Course(course_ID TEXT,course_Name TEXT); CREATE TABLE Course_Prerequisite(course_ID TEXT,prerequisite_Course_ID TEXT,min_Grade_Req TEXT);CREATE TABLE Course_Section(CRN INT,course_ID TEXT);CREATE TABLE Student_History(student_ID INT,CRN INT,grade TEXT);CREATE TABLE Enrollment(student_ID INT,CRN INT,grade TEXT);INSERT INTO Course VALUES('BIO115','General Biology II'),('BIO220','Cell Biology'),('BIO225','Ecology');INSERT INTO Course_Prerequisite VALUES('BIO220','BIO115','D'),('BIO330','BIO220','D'),('BIO330','BIO225','D');INSERT INTO Course_Section VALUES(1,'BIO115');INSERT INTO Student_History VALUES(1,1,'B'),(2,1,'F');INSERT INTO Enrollment VALUES(3,1,NULL);");
+function rows(string $sql,array $params=[]):array{if(!str_starts_with($sql,'SELECT'))throw new RuntimeException('Read-only evidence');$s=$GLOBALS['db']->prepare($sql);$s->execute($params);return$s->fetchAll();}
+require __DIR__.'/../api/registration-prerequisites.php';
+function check(bool $yes,string $why):void{if(!$yes)throw new RuntimeException($why);}
+$e=registrationPrerequisiteEvidence(1,['BIO220','BIO115','BIO330']);check(count($e['BIO220'])===1&&$e['BIO220'][0]['met']===true,'Satisfied prerequisite vanished');check($e['BIO220'][0]['code']==='BIO115'&&$e['BIO220'][0]['title']==='General Biology II'&&$e['BIO220'][0]['minimum_grade']==='D','Incorrect configured evidence');check($e['BIO115']===[],'Invented BIO115 prerequisite');check(count($e['BIO330'])===2,'Multiple configured prerequisites lost');
+check(!registrationPrerequisiteEvidence(2,['BIO220'])['BIO220'][0]['met'],'Failing grade shown met');check(!registrationPrerequisiteEvidence(3,['BIO220'])['BIO220'][0]['met'],'Concurrent enrollment shown completed');
+check(registrationPrerequisiteEvidence(1,[])===[],'Empty candidate query');echo "PASS prerequisite display: all configured rules retained, passing/failing/current-only evidence, titles/minimum grades, multiple rules and true empty configuration.\n";
