@@ -1,0 +1,37 @@
+Current-main grouped Register publication — 2026-11-27
+Main base: a9725667d664efba5cb4c6ed69128e45bccbeecd
+Foundation: b430d588166f879a8c71e44993d892e0a50b308c
+30 final checks passed on the application/test content in this review.
+PASS Student acceptance — bash tests/student-acceptance.sh
+PASS Registration windows — php tests/registration-windows.php
+PASS Window browser — node tests/registration-windows-browser.cjs
+PASS Program access — php tests/registration-program-access.php
+PASS Explicit access API — node tests/registration-program-access-api.cjs /private/var/folders/g0/2qpjstd13713b19_kw4bshtm0000gn/T/campus-student-review-db.Ylq6Jw/mysql.sock
+PASS Matcher — php tests/registration-requirements.php
+PASS Standing — php tests/academic-standing.php
+PASS Standing Add — php tests/standing-registration.php
+PASS Locking — php tests/registration-locking.php
+PASS Degree Audit — php tests/degree-audit.php
+PASS Admin registration — php tests/admin-student-accounts.php
+PASS Faculty — php tests/faculty-lab-visibility.php
+PASS Faculty browser — node tests/faculty-lab-visibility-browser.cjs
+PASS Admin access — bash tests/admin-access.sh
+PASS Create Section — bash tests/create-section-live.sh
+PASS Capacity — php tests/section-capacity.php
+PASS Scheduling — php tests/section-scheduling.php
+PASS Major preview — bash tests/degree-audit-major-preview.sh
+PASS Security — node tests/security/run.cjs
+PASS Requirement browser — node tests/registration-requirements-browser.cjs /private/var/folders/g0/2qpjstd13713b19_kw4bshtm0000gn/T/campus-student-review-db.Ylq6Jw/mysql.sock
+PASS Student integration — node tests/student-review-integration.cjs /private/var/folders/g0/2qpjstd13713b19_kw4bshtm0000gn/T/campus-student-review-db.Ylq6Jw/mysql.sock
+PASS Spring browser — node tests/spring-registration-browser.cjs /private/var/folders/g0/2qpjstd13713b19_kw4bshtm0000gn/T/campus-student-review-db.Ylq6Jw/mysql.sock --student-review
+PASS registration-prerequisites.php — php tests/registration-prerequisites.php
+PASS registration-course-groups.php — php tests/registration-course-groups.php
+PASS register-layout-browser.cjs — node tests/register-layout-browser.cjs /private/var/folders/g0/2qpjstd13713b19_kw4bshtm0000gn/T/campus-student-review-db.Ylq6Jw/mysql.sock
+PASS register-restrictions-browser.cjs — node tests/register-restrictions-browser.cjs /private/var/folders/g0/2qpjstd13713b19_kw4bshtm0000gn/T/campus-student-review-db.Ylq6Jw/mysql.sock
+PASS course-access-and-groups-browser.cjs — node tests/course-access-and-groups-browser.cjs /private/var/folders/g0/2qpjstd13713b19_kw4bshtm0000gn/T/campus-student-review-db.Ylq6Jw/mysql.sock
+PASS register-polish-browser.cjs — node tests/register-polish-browser.cjs /private/var/folders/g0/2qpjstd13713b19_kw4bshtm0000gn/T/campus-student-review-db.Ylq6Jw/mysql.sock
+PASS register-card-hierarchy-browser.cjs — node tests/register-card-hierarchy-browser.cjs /private/var/folders/g0/2qpjstd13713b19_kw4bshtm0000gn/T/campus-student-review-db.Ylq6Jw/mysql.sock
+PASS register-terminology-browser.cjs — node tests/register-terminology-browser.cjs /private/var/folders/g0/2qpjstd13713b19_kw4bshtm0000gn/T/campus-student-review-db.Ylq6Jw/mysql.sock
+
+1440/1024/390 layout, native keyboard/touch controls, complete prerequisite evidence, explicit access rows in disposable tests only, mixed section eligibility, all reasons, BIO115 B priority, allocation-backed optional matches, approval disclosures, filters and actual Add/Drop were verified.
+No academic proposal SQL, new shared seed, schedule data, reconstructed histories or unrelated Faculty/Audit/Transcript code is included.

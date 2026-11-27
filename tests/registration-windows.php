@@ -50,6 +50,8 @@ function one(string $sql, array $params = []): ?array
 }
 function rows(string $sql, array $params = []): array
 {
+    // This date-window fixture has no real meeting map; live diagnostics test overlaps separately.
+    if (str_starts_with($sql, 'SELECT DISTINCT m.course_ID, m.CRN')) return [];
     if (str_contains($sql, 'FROM Student_History h LEFT JOIN Course c')) return [];
     if (str_contains($sql, 'FROM Gen_Ed_Requirement r')) return [];
     if (str_contains($sql, 'FROM Semester')) return selectFixture($sql, $params);
