@@ -26,6 +26,8 @@ done
 test "$(fixture_sql -N -e "SELECT @@socket='$socket' AND @@skip_networking=1")" = 1
 fixture_sql < db/Database_schema.sql
 fixture_sql campus_connect < db/Project_data.sql
+# The shared registration validator needs the configured Natural Sciences pathway.
+fixture_sql campus_connect < database/migrations/2026-11-11-add-general-education.sql
 DB_PASSWORD=$(php -r 'echo bin2hex(random_bytes(24));')
 fixture_sql <<SQL
 CREATE USER 'admin_fixture'@'localhost' IDENTIFIED BY '$DB_PASSWORD';
